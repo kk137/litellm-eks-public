@@ -1,0 +1,102 @@
+# Karpenter NodePool: auto-provision nodes for litellm workloads
+# Requires: Karpenter v1.3.0+ installed via Helm (OCI: public.ecr.aws/karpenter/karpenter)
+# Prerequisites:
+#   - KarpenterNodeRole-<cluster> IAM role with EKS worker policies
+#   - KarpenterControllerRole-<cluster> IAM role (IRSA) with EC2/EKS permissions
+#   - EC2 Spot Service-Linked Role (aws iam create-service-linked-role --aws-service-name spot.amazonaws.com)
+#   - Subnet tags: karpenter.sh/discovery=<cluster-name>
+#   - Security group tags: karpenter.sh/discovery=<cluster-name>
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: litellm-nodepool
+spec:
+  template:
+    metadata:
+      labels:
+        workload: litellm
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: litellm-nodeclass
+
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+
+        # Use both On-Demand and Spot for cost optimization
+        # (LiteLLM is stateless, tolerates Spot interruptions with HPA)
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand", "spot"]
+
+        # Preferred instance types: memory-optimized for LLM proxy
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values:
+            - "m6i.xlarge"       # 4 vCPU, 16 GB
+            - "m6i.2xlarge"      # 8 vCPU, 32 GB
+            - "m7i.xlarge"
+            - "m7i.2xlarge"
+            - "r6i.xlarge"       # Memory-optimized
+            - "r6i.2xlarge"
+
+        # Must span all three AZs
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values:
+            - "us-east-1a"       # Replace with your AZs
+            - "us-east-1b"
+            - "us-east-1c"
+
+      taints: []                  # No taints: general-purpose nodes
+
+  # Node pool limits (prevent runaway scaling)
+  limits:
+    cpu: 200
+    memory: 400Gi
+
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 60s         # Reclaim idle nodes after 60s
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: litellm-nodeclass
+spec:
+  amiFamily: AL2023                 # Amazon Linux 2023 (latest)
+  amiSelectorTerms:
+    - alias: al2023@latest
+  role: "KarpenterNodeRole-litellm-cluster"   # EKS cluster name
+
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "litellm-cluster"
+        kubernetes.io/role/internal-elb: "1"      # Private subnets only
+
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "litellm-cluster"
+
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        iops: 3000
+        throughput: 125
+        encrypted: true           # Encrypt EBS volumes at rest
+
+  # User data: install SSM agent for secure shell access (no bastion needed)
+  userData: |
+    #!/bin/bash
+    yum install -y amazon-ssm-agent
+    systemctl enable amazon-ssm-agent
+    systemctl start amazon-ssm-agent
+
+  tags:
+    Project: litellm
+    ManagedBy: karpenter

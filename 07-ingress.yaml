@@ -1,0 +1,55 @@
+# Requires: AWS Load Balancer Controller installed in the cluster
+# Requires: ACM certificate ARN and WAF WebACL ARN (replace placeholders)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app: litellm
+  annotations:
+    # ALB configuration
+    # kubernetes.io/ingress.class: alb  # deprecated, use spec.ingressClassName
+    alb.ingress.kubernetes.io/scheme: internet-facing         # Use 'internal' for private access
+    alb.ingress.kubernetes.io/target-type: ip                # Direct pod routing (recommended)
+
+    # TLS: HTTPS only, redirect HTTP → HTTPS
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:<REGION>:<YOUR_ACCOUNT_ID>:certificate/<YOUR_CERT_ID>
+
+    # Security: restrict ALB inbound to specific CIDR only (no 0.0.0.0/0)
+    alb.ingress.kubernetes.io/inbound-cidrs: "<YOUR_ALLOWED_CIDRS>"
+
+    # WAF: Core Rule Set (Count) + Known Bad Inputs (Count) + Rate Limit 1000/5min (Block)
+    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:<REGION>:<YOUR_ACCOUNT_ID>:regional/webacl/litellm-waf/<YOUR_WAF_ID>
+
+    # Health check
+    alb.ingress.kubernetes.io/healthcheck-path: /health/readiness
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # Performance: HTTP/2, keep-alive, idle timeout for long LLM streams, cross-zone
+    alb.ingress.kubernetes.io/load-balancer-attributes: >-
+      idle_timeout.timeout_seconds=600,
+      routing.http2.enabled=true,
+      load_balancing.cross_zone.enabled=true
+
+    # Deregistration: wait 30s for in-flight requests before draining
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+
+spec:
+  ingressClassName: alb
+  rules:
+    - host: <YOUR_DOMAIN>
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: litellm
+                port:
+                  number: 4000

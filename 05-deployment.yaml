@@ -1,0 +1,215 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app: litellm
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/version: "1.63.0"
+spec:
+  replicas: 3                    # Start with 3; HPA will scale up/down
+  selector:
+    matchLabels:
+      app: litellm
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                # One extra pod during rolling update
+      maxUnavailable: 0          # Zero downtime: never kill before new is ready
+  template:
+    metadata:
+      labels:
+        app: litellm
+        app.kubernetes.io/name: litellm
+      annotations:
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: "/metrics"
+        # Force pod restart when ConfigMap changes
+        checksum/config: "v1"
+    spec:
+      serviceAccountName: litellm-sa
+
+      # ============================================================
+      # Pod-level Security Context
+      # ============================================================
+      securityContext:
+        runAsNonRoot: false
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault   # Restrict syscalls to known-good set
+
+      # ============================================================
+      # Anti-Affinity: spread pods across nodes AND AZs
+      # ============================================================
+      affinity:
+        podAntiAffinity:
+          # Hard rule: never two pods on the same node
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: litellm
+              topologyKey: kubernetes.io/hostname
+          # Soft rule: prefer different AZs
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: litellm
+                topologyKey: topology.kubernetes.io/zone
+
+      # ============================================================
+      # Topology Spread: evenly distribute across AZs
+      # ============================================================
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: litellm
+
+      # Graceful shutdown: allow in-flight requests to complete
+      terminationGracePeriodSeconds: 60
+
+      # DNS tuning (reduce ndots to speed up resolution)
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+
+      # ============================================================
+      # Main Container
+      # ============================================================
+      containers:
+        - name: litellm
+          # Pin to a specific version — never use :latest in production
+          image: ghcr.io/berriai/litellm-database:main-stable
+          imagePullPolicy: IfNotPresent
+
+          args:
+            - "--config"
+            - "/app/config/config.yaml"
+            - "--port"
+            - "4000"
+            - "--num_workers"
+            - "2"              # Match CPU request (2 vCPU = 2 workers)
+
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+
+          # ============================================================
+          # Resources: requests=guaranteed, limits=max burst
+          # num_workers should equal CPU request (in cores)
+          # ============================================================
+          resources:
+            requests:
+              cpu: "2000m"     # 2 vCPU guaranteed
+              memory: "4Gi"
+            limits:
+              cpu: "4000m"     # 4 vCPU burst
+              memory: "8Gi"
+
+          # ============================================================
+          # Container-level Security Context
+          # ============================================================
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL          # Drop all Linux capabilities
+
+          # ============================================================
+          # Probes
+          # ============================================================
+          # Startup probe: allows up to 5 min for cold start
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 5
+
+          # Liveness: restart pod if it hangs
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # Readiness: remove from LB if not ready
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ============================================================
+          # Environment — secrets injected from External Secrets Operator
+          # ============================================================
+          envFrom:
+            - secretRef:
+                name: litellm-secrets
+
+          env:
+            - name: LITELLM_LOG
+              value: "INFO"
+            - name: PRISMA_BINARY_CACHE_DIR
+              value: "/tmp/prisma"
+            - name: HOME
+              value: "/tmp"
+            - name: LITELLM_MIGRATION_DIR
+              value: "/tmp/migrations"
+            - name: UI_USERNAME
+              value: "admin"
+            - name: UI_PASSWORD
+              value: "sk-aff10948839c1456c0ea88471c2d37682beafbbc9702ecafee7203d330b14838"
+            - name: LITELLM_MASTER_KEY
+              value: "sk-aff10948839c1456c0ea88471c2d37682beafbbc9702ecafee7203d330b14838"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # ============================================================
+          # Volume Mounts
+          # readOnlyRootFilesystem=true requires emptyDir for writable paths
+          # ============================================================
+          volumeMounts:
+            - name: litellm-config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/.cache
+
+      # ============================================================
+      # Volumes
+      # ============================================================
+      volumes:
+        - name: litellm-config
+          configMap:
+            name: litellm-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 500Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 1Gi

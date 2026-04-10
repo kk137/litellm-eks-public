@@ -1,0 +1,65 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: litellm-cluster
+  region: us-east-1
+  version: "1.35"
+  tags:
+    Project: litellm
+    ManagedBy: eksctl
+
+# IAM OIDC provider for IRSA
+iam:
+  withOIDC: true
+  serviceAccounts:
+    - metadata:
+        name: aws-load-balancer-controller
+        namespace: kube-system
+      wellKnownPolicies:
+        awsLoadBalancerController: true
+
+# VPC: 3 AZs, public + private subnets
+vpc:
+  cidr: 10.42.0.0/16
+  nat:
+    gateway: HighlyAvailable    # NAT GW per AZ for HA
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+availabilityZones:
+  - us-east-1a
+  - us-east-1b
+  - us-east-1c
+
+# Managed node group for all workloads (system components + litellm)
+# Managed node group: empty — Karpenter manages all workload nodes
+# System components (CoreDNS, kube-proxy, Karpenter itself) run on initial nodes
+managedNodeGroups: []
+
+# Karpenter v1.3.0 manages litellm workload nodes (see 11-karpenter-nodepool.yaml)
+# Install via: helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version 1.3.0
+
+# EKS managed addons
+addons:
+  - name: vpc-cni
+    version: latest
+    configurationValues: '{"enableNetworkPolicy": "true"}'
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+  - name: aws-ebs-csi-driver
+    version: latest
+    wellKnownPolicies:
+      ebsCSIController: true
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator
+      - controllerManager
+      - scheduler
