@@ -175,9 +175,9 @@ spec:
             - name: UI_USERNAME
               value: "admin"
             - name: UI_PASSWORD
-              value: "sk-aff10948839c1456c0ea88471c2d37682beafbbc9702ecafee7203d330b14838"
+              value: "sk-aff"
             - name: LITELLM_MASTER_KEY
-              value: "sk-aff10948839c1456c0ea88471c2d37682beafbbc9702ecafee7203d330b14838"
+              value: "sk-aff"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
