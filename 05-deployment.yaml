@@ -179,11 +179,25 @@ spec:
               value: "/tmp"
             - name: LITELLM_MIGRATION_DIR
               value: "/tmp/migrations"
+            # SSO via Cognito OIDC (GENERIC_CLIENT_ID/SECRET injected via envFrom)
+            - name: GENERIC_AUTHORIZATION_ENDPOINT
+              value: "https://litellm-345594601181.auth.us-east-1.amazoncognito.com/oauth2/authorize"
+            - name: GENERIC_TOKEN_ENDPOINT
+              value: "https://litellm-345594601181.auth.us-east-1.amazoncognito.com/oauth2/token"
+            - name: GENERIC_USERINFO_ENDPOINT
+              value: "https://litellm-345594601181.auth.us-east-1.amazoncognito.com/oauth2/userInfo"
+            - name: PROXY_BASE_URL
+              value: "https://litellm.hajunyao.people.aws.dev"
+            - name: GENERIC_CLIENT_STATE
+              value: "litellm-sso"
+            - name: AUTO_REDIRECT_UI_LOGIN_TO_SSO
+              value: "true"
+            - name: GENERIC_ROLE_MAPPINGS_GROUP_CLAIM
+              value: "cognito:groups"
+            - name: GENERIC_ROLE_MAPPINGS_ROLES
+              value: "{'proxy_admin': ['admin'], 'proxy_admin_viewer': ['viewer'], 'internal_user': ['users'], 'internal_user_viewer': ['user_viewer']}"
             - name: UI_USERNAME
               value: "admin"
-            # UI_PASSWORD and LITELLM_MASTER_KEY are injected via envFrom:
-            # secretRef: litellm-secrets (synced from AWS Secrets Manager by ESO).
-            # Do NOT hardcode them here — explicit env overrides envFrom.
             - name: POD_NAME
               valueFrom:
                 fieldRef:

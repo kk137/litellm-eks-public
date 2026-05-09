@@ -248,6 +248,10 @@ aws secretsmanager create-secret --name litellm/gemini-api-key --secret-string "
 aws secretsmanager create-secret --name litellm/openai-api-key --secret-string "PLACEHOLDER" --region $REGION
 aws secretsmanager create-secret --name litellm/ui-password    --secret-string "PLACEHOLDER" --region $REGION
 
+# SSO 密钥（Cognito OIDC，见"SSO 配置"章节）
+aws secretsmanager create-secret --name litellm/cognito-client-id     --secret-string "$COGNITO_CLIENT_ID" --region $REGION
+aws secretsmanager create-secret --name litellm/cognito-client-secret --secret-string "$COGNITO_CLIENT_SECRET" --region $REGION
+
 echo "Master Key: sk-$MASTER_KEY"
 ```
 
@@ -400,7 +404,7 @@ litellm-eks/
 ├── 00-namespace.yaml            # Namespace
 ├── 01-serviceaccount.yaml       # ServiceAccount (IRSA)
 ├── 02-secretstore.yaml          # ESO SecretStore
-├── 03-externalsecret.yaml       # ESO ExternalSecret (10 个密钥)
+├── 03-externalsecret.yaml       # ESO ExternalSecret (12 个密钥)
 ├── 04-configmap.yaml            # LiteLLM 配置（模型列表、路由、缓存）
 ├── 05-deployment.yaml           # Deployment (3 副本, 反亲和, 探针)
 ├── 06-service.yaml              # ClusterIP Service
@@ -429,6 +433,8 @@ litellm-eks/
 | 8 | **Karpenter Spot 首次使用** — 缺少 EC2 Spot Service-Linked Role 导致 `AuthFailure.ServiceLinkedRoleCreationNotPermitted` | 需先执行 `aws iam create-service-linked-role --aws-service-name spot.amazonaws.com` |
 | 9 | **Karpenter 子网/安全组发现** — NodeClaim 创建失败，找不到子网或安全组 | 必须给 private 子网和集群安全组打 `karpenter.sh/discovery=<cluster-name>` 标签 |
 | 10 | **Karpenter 不能运行在自己管理的节点上** — nodeAffinity 要求 `karpenter.sh/nodepool DoesNotExist`，纯 Karpenter 集群无法启动 | 必须保留 Managed Node Group (min=2) 作为系统节点，运行 Karpenter controller；LiteLLM Deployment 需添加 `nodeAffinity: karpenter.sh/nodepool Exists` 避免调度到系统节点 |
+| 11 | **AWS LB Controller IMDS 失败** — 切换到 Graviton 节点后，LB Controller 无法从 EC2 Instance Metadata 获取 VPC ID，CrashLoopBackOff | 启动参数添加 `--aws-vpc-id=<VPC_ID>` 显式指定 VPC ID |
+| 12 | **SSO 免费限制** — LiteLLM SSO 功能免费仅限 5 用户（v1.76.0+），超过需 Enterprise License | 评估用户数，必要时申请 License |
 
 ---
 
@@ -520,6 +526,51 @@ kubectl rollout restart deployment/litellm -n litellm
 
 ---
 
+## SSO 配置（Cognito OIDC）
+
+管理界面（`/ui`）通过 AWS Cognito SSO 认证，API 调用仍使用 Master Key / per-user Key。
+
+### 组件
+
+| 组件 | 说明 |
+|------|------|
+| Cognito User Pool | `<YOUR_USER_POOL_ID>` |
+| Cognito Domain | `<YOUR_COGNITO_DOMAIN>.auth.<REGION>.amazoncognito.com` |
+| Callback URL | `https://<YOUR_DOMAIN>/sso/callback` |
+| 回退登录 | `https://<YOUR_DOMAIN>/fallback/login` |
+
+### 角色映射
+
+Cognito 默认在 JWT 中包含 `cognito:groups` claim，LiteLLM 直接读取该字段映射角色（无需 Lambda）。
+
+| Cognito 组 | LiteLLM 角色 | 权限 |
+|-----------|-------------|------|
+| `admin` | `proxy_admin` | 完全管理（用户、模型、Key、配额） |
+| `viewer` | `proxy_admin_viewer` | 管理界面只读 |
+| `users` | `internal_user` | 创建/管理自己的 API Key |
+| `user_viewer` | `internal_user_viewer` | 只能查看自己的 Key |
+
+### 用户管理
+
+通过 AWS Console（Cognito → User pools → `<YOUR_POOL_NAME>`）或 CLI：
+
+```bash
+# 创建用户
+aws cognito-idp admin-create-user --user-pool-id $USER_POOL_ID \
+  --username <用户名> --user-attributes Name=email,Value=<邮箱> Name=email_verified,Value=true \
+  --region $REGION
+
+# 设置密码
+aws cognito-idp admin-set-user-password --user-pool-id $USER_POOL_ID \
+  --username <用户名> --password '<密码>' --permanent --region $REGION
+
+# 分配组
+aws cognito-idp admin-add-user-to-group --user-pool-id $USER_POOL_ID \
+  --username <用户名> --group-name admin --region $REGION
+```
+
+---
+
 ## 运维命令
 
 ```bash
@@ -574,7 +625,8 @@ aws rds delete-db-cluster --db-cluster-identifier litellm-db \
 
 # 删除 Secrets Manager
 for s in master-key salt-key database-url redis-host redis-password \
-         azure-api-key azure-api-base gemini-api-key openai-api-key ui-password; do
+         azure-api-key azure-api-base gemini-api-key openai-api-key ui-password \
+         cognito-client-id cognito-client-secret; do
   aws secretsmanager delete-secret --secret-id "litellm/$s" \
     --force-delete-without-recovery --region $REGION
 done
