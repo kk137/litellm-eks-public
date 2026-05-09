@@ -42,9 +42,16 @@ spec:
           type: RuntimeDefault   # Restrict syscalls to known-good set
 
       # ============================================================
-      # Anti-Affinity: spread pods across nodes AND AZs
+      # Node Affinity + Anti-Affinity
       # ============================================================
       affinity:
+        # Only schedule on Karpenter-managed nodes (system NG reserved for controllers)
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: Exists
         podAntiAffinity:
           # Hard rule: never two pods on the same node
           requiredDuringSchedulingIgnoredDuringExecution:

@@ -24,7 +24,7 @@ spec:
       requirements:
         - key: kubernetes.io/arch
           operator: In
-          values: ["amd64"]
+          values: ["arm64"]
 
         # Use both On-Demand and Spot for cost optimization
         # (LiteLLM is stateless, tolerates Spot interruptions with HPA)
@@ -32,16 +32,14 @@ spec:
           operator: In
           values: ["on-demand", "spot"]
 
-        # Preferred instance types: memory-optimized for LLM proxy
+        # Graviton instance types: memory-optimized for LLM proxy
         - key: node.kubernetes.io/instance-type
           operator: In
           values:
-            - "m6i.xlarge"       # 4 vCPU, 16 GB
-            - "m6i.2xlarge"      # 8 vCPU, 32 GB
-            - "m7i.xlarge"
-            - "m7i.2xlarge"
-            - "r6i.xlarge"       # Memory-optimized
-            - "r6i.2xlarge"
+            - "r7g.xlarge"       # 4 vCPU, 32 GB (primary)
+            - "r7g.2xlarge"      # 8 vCPU, 64 GB
+            - "r6g.xlarge"       # 4 vCPU, 32 GB (fallback)
+            - "r6g.2xlarge"      # 8 vCPU, 64 GB
 
         # Must span all three AZs
         - key: topology.kubernetes.io/zone

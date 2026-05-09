@@ -27,8 +27,8 @@
 | 组件 | 规格 | 用途 |
 |------|------|------|
 | EKS | K8s 1.35, 3 AZ | 容器编排 |
-| 系统节点组 | 2× m7i.large | CoreDNS, kube-proxy 等 |
-| 工作负载节点组 | Karpenter 自动扩缩 (Spot + On-Demand) | LiteLLM Pod |
+| 系统节点组 | 2× m7g.large Graviton (Managed NG, min=2/max=3) | Karpenter controller, CoreDNS, kube-proxy |
+| 工作负载节点组 | Karpenter 自动扩缩 r7g/r6g Graviton (Spot + On-Demand) | LiteLLM Pod (nodeAffinity 限定) |
 | LiteLLM | 3 副本, `litellm-database:main-stable` | LLM 代理网关 |
 | Aurora PostgreSQL | Serverless v2 (0.5–8 ACU) | 用户/Key/用量元数据 |
 | ElastiCache Redis | cache.r7g.large × 2, TLS+Auth | 响应缓存 |
@@ -246,6 +246,7 @@ aws secretsmanager create-secret --name litellm/azure-api-key  --secret-string "
 aws secretsmanager create-secret --name litellm/azure-api-base --secret-string "PLACEHOLDER" --region $REGION
 aws secretsmanager create-secret --name litellm/gemini-api-key --secret-string "PLACEHOLDER" --region $REGION
 aws secretsmanager create-secret --name litellm/openai-api-key --secret-string "PLACEHOLDER" --region $REGION
+aws secretsmanager create-secret --name litellm/ui-password    --secret-string "PLACEHOLDER" --region $REGION
 
 echo "Master Key: sk-$MASTER_KEY"
 ```
@@ -399,7 +400,7 @@ litellm-eks/
 ├── 00-namespace.yaml            # Namespace
 ├── 01-serviceaccount.yaml       # ServiceAccount (IRSA)
 ├── 02-secretstore.yaml          # ESO SecretStore
-├── 03-externalsecret.yaml       # ESO ExternalSecret (9 个密钥)
+├── 03-externalsecret.yaml       # ESO ExternalSecret (10 个密钥)
 ├── 04-configmap.yaml            # LiteLLM 配置（模型列表、路由、缓存）
 ├── 05-deployment.yaml           # Deployment (3 副本, 反亲和, 探针)
 ├── 06-service.yaml              # ClusterIP Service
@@ -427,6 +428,7 @@ litellm-eks/
 | 7 | **Karpenter v1.3.0 API 变更** — `nodeClassRef.apiVersion` 字段已移除，`consolidationPolicy` 值 `WhenUnderutilized` 改为 `WhenEmptyOrUnderutilized` | 使用 `nodeClassRef.group: karpenter.k8s.aws` 替代；EC2NodeClass 必须包含 `amiSelectorTerms` |
 | 8 | **Karpenter Spot 首次使用** — 缺少 EC2 Spot Service-Linked Role 导致 `AuthFailure.ServiceLinkedRoleCreationNotPermitted` | 需先执行 `aws iam create-service-linked-role --aws-service-name spot.amazonaws.com` |
 | 9 | **Karpenter 子网/安全组发现** — NodeClaim 创建失败，找不到子网或安全组 | 必须给 private 子网和集群安全组打 `karpenter.sh/discovery=<cluster-name>` 标签 |
+| 10 | **Karpenter 不能运行在自己管理的节点上** — nodeAffinity 要求 `karpenter.sh/nodepool DoesNotExist`，纯 Karpenter 集群无法启动 | 必须保留 Managed Node Group (min=2) 作为系统节点，运行 Karpenter controller；LiteLLM Deployment 需添加 `nodeAffinity: karpenter.sh/nodepool Exists` 避免调度到系统节点 |
 
 ---
 
@@ -482,22 +484,22 @@ aws wafv2 create-web-acl \
 
 | 模型别名 | Bedrock 模型 ID | 说明 |
 |----------|----------------|------|
-| `claude-sonnet-4.6` | `bedrock/us.anthropic.claude-sonnet-4-6` | Claude Sonnet 4.6（最新） |
-| `claude-sonnet-4.5` | `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` | Claude Sonnet 4.5 |
-| `claude-sonnet-4` | `bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0` | Claude Sonnet 4 |
-| `claude-opus-4.6` | `bedrock/us.anthropic.claude-opus-4-6-v1` | Claude Opus 4.6 |
-| `claude-opus-4.5` | `bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0` | Claude Opus 4.5 |
-| `claude-haiku-4.5` | `bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0` | Claude Haiku 4.5 |
-| `claude-3.5-haiku` | `bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0` | Claude 3.5 Haiku |
+| `bedrock-claude-sonnet46` | `bedrock/us.anthropic.claude-sonnet-4-6` | Claude Sonnet 4.6（最新） |
+| `bedrock-claude-sonnet45` | `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` | Claude Sonnet 4.5 |
+| `bedrock-claude-sonnet4` | `bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0` | Claude Sonnet 4 |
+| `bedrock-claude-opus46` | `bedrock/us.anthropic.claude-opus-4-6-v1` | Claude Opus 4.6 |
+| `bedrock-claude-opus45` | `bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0` | Claude Opus 4.5 |
+| `bedrock-claude-haiku45` | `bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0` | Claude Haiku 4.5 |
+| `bedrock-claude-haiku35` | `bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0` | Claude 3.5 Haiku |
 
 ### AWS Bedrock Nova 模型（IRSA 认证）
 
 | 模型别名 | Bedrock 模型 ID | 说明 |
 |----------|----------------|------|
-| `nova-premier` | `bedrock/us.amazon.nova-premier-v1:0` | Nova Premier |
-| `nova-pro` | `bedrock/us.amazon.nova-pro-v1:0` | Nova Pro |
-| `nova-lite` | `bedrock/us.amazon.nova-lite-v1:0` | Nova Lite |
-| `nova-micro` | `bedrock/us.amazon.nova-micro-v1:0` | Nova Micro |
+| `bedrock-nova-premier` | `bedrock/us.amazon.nova-premier-v1:0` | Nova Premier |
+| `bedrock-nova-pro` | `bedrock/us.amazon.nova-pro-v1:0` | Nova Pro |
+| `bedrock-nova-lite` | `bedrock/us.amazon.nova-lite-v1:0` | Nova Lite |
+| `bedrock-nova-micro` | `bedrock/us.amazon.nova-micro-v1:0` | Nova Micro |
 
 ### 其他 LLM 提供商（需 API Key）
 
@@ -572,7 +574,7 @@ aws rds delete-db-cluster --db-cluster-identifier litellm-db \
 
 # 删除 Secrets Manager
 for s in master-key salt-key database-url redis-host redis-password \
-         azure-api-key azure-api-base gemini-api-key openai-api-key; do
+         azure-api-key azure-api-base gemini-api-key openai-api-key ui-password; do
   aws secretsmanager delete-secret --secret-id "litellm/$s" \
     --force-delete-without-recovery --region $REGION
 done

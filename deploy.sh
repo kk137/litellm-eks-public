@@ -31,6 +31,7 @@ echo "请手动设置以下密钥值（替换 YOUR_* 占位符）:"
 
 MASTER_KEY=$(openssl rand -hex 32)
 SALT_KEY=$(openssl rand -hex 16)
+UI_PASSWORD=$(openssl rand -hex 16)
 
 aws secretsmanager create-secret --name litellm/master-key \
   --secret-string "$MASTER_KEY" --region $REGION 2>/dev/null || \
@@ -42,7 +43,12 @@ aws secretsmanager create-secret --name litellm/salt-key \
   aws secretsmanager put-secret-value --secret-id litellm/salt-key \
   --secret-string "$SALT_KEY" --region $REGION
 
-echo "  ✅ master-key 和 salt-key 已自动生成"
+aws secretsmanager create-secret --name litellm/ui-password \
+  --secret-string "$UI_PASSWORD" --region $REGION 2>/dev/null || \
+  aws secretsmanager put-secret-value --secret-id litellm/ui-password \
+  --secret-string "$UI_PASSWORD" --region $REGION
+
+echo "  ✅ master-key、salt-key、ui-password 已自动生成"
 echo ""
 echo "  ⚠️  以下密钥稍后手动创建（不影响部署流程）:"
 echo "  aws secretsmanager create-secret --name litellm/azure-api-key --secret-string 'YOUR_AZURE_KEY' --region $REGION"
@@ -426,9 +432,13 @@ echo ""
 echo "端点: https://$DOMAIN"
 echo "健康检查: https://$DOMAIN/health/readiness"
 echo ""
+echo "密钥信息（请妥善保管）:"
+echo "  API Master Key: sk-$MASTER_KEY"
+echo "  UI 登录: admin / $UI_PASSWORD"
+echo ""
 echo "测试命令:"
 echo "  curl -H 'Authorization: Bearer sk-$MASTER_KEY' https://$DOMAIN/v1/chat/completions \\"
-echo "    -d '{\"model\": \"claude-3-5-sonnet\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'"
+echo "    -d '{\"model\": \"bedrock-claude-sonnet46\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'"
 echo ""
 echo "查看状态:"
 echo "  kubectl get pods -n litellm"
