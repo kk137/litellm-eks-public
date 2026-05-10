@@ -5,6 +5,11 @@
 
 ## 架构概览
 
+![Architecture](architecture.png)
+
+<details>
+<summary>文本版架构图</summary>
+
 ```
                     ┌─────────────────────────────────────────────────┐
                     │                   AWS Cloud                     │
@@ -21,6 +26,8 @@
                     │  Secrets Manager ◀── External Secrets Operator  │
                     └─────────────────────────────────────────────────┘
 ```
+
+</details>
 
 ## 组件清单
 
