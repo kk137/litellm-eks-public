@@ -1,0 +1,79 @@
+# Network Policy: zero-trust — deny all by default, allow only what's needed
+# Requires: VPC CNI with network policy support, or Calico
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-deny-all
+  namespace: litellm
+spec:
+  podSelector: {}        # Applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-allow
+  namespace: litellm
+spec:
+  podSelector:
+    matchLabels:
+      app: litellm
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow traffic from ALB (kube-system hosts the AWS LB Controller)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 4000
+    # Allow Prometheus scraping from monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 4000
+    # Allow ALB direct-to-pod traffic (target-type: ip)
+    # Replace 10.42.0.0/16 with your VPC CIDR
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+      ports:
+        - port: 4000
+
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+    # HTTPS to external APIs: Bedrock, Gemini, OpenAI, etc.
+    - ports:
+        - port: 443
+          protocol: TCP
+
+    # Redis (ElastiCache in VPC)
+    # Replace 10.42.0.0/16 with your VPC CIDR
+    - to:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+      ports:
+        - port: 6379
+          protocol: TCP
+
+    # PostgreSQL (Aurora RDS in VPC)
+    # Replace 10.42.0.0/16 with your VPC CIDR
+    - to:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+      ports:
+        - port: 5432
+          protocol: TCP

@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiteLLM EKS 生产级部署指南</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  color: #24292e;
+  background: #fff;
+  line-height: 1.6;
+}
+h1 {
+  font-size: 2em;
+  border-bottom: 2px solid #1F4E79;
+  padding-bottom: 0.3em;
+  color: #1F4E79;
+}
+h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+  margin-top: 2em;
+  color: #1F4E79;
+}
+h3 {
+  font-size: 1.2em;
+  color: #333;
+  margin-top: 1.5em;
+}
+h4 {
+  font-size: 1em;
+  color: #1F4E79;
+  margin-top: 1.2em;
+}
+p, li { color: #333; }
+a { color: #1F4E79; text-decoration: none; }
+a:hover { text-decoration: underline; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+  font-size: 14px;
+}
+th, td {
+  border: 1px solid #dfe2e5;
+  padding: 8px 12px;
+  text-align: left;
+}
+th {
+  background-color: #1F4E79;
+  color: #fff;
+  font-weight: 600;
+}
+tr:nth-child(even) { background-color: #f6f8fa; }
+tr:hover { background-color: #e8f0fe; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+hr {
+  border: none;
+  border-top: 1px solid #eaecef;
+  margin: 2em 0;
+}
+code {
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+pre {
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+blockquote {
+  border-left: 4px solid #ED7D31;
+  padding-left: 16px;
+  color: #555;
+  margin: 16px 0;
+}
+nav {
+  background: #f6f8fa;
+  padding: 16px 24px;
+  border-radius: 6px;
+  margin-bottom: 2em;
+  border: 1px solid #e1e4e8;
+}
+nav ul { list-style: none; padding-left: 0; margin: 0; }
+nav ul ul { padding-left: 20px; }
+nav li { margin: 4px 0; }
+nav a { color: #1F4E79; text-decoration: none; font-size: 14px; }
+nav a:hover { text-decoration: underline; color: #ED7D31; }
+.header-bar {
+  background: linear-gradient(135deg, #1F4E79, #2d6da3);
+  color: #fff;
+  padding: 30px 40px;
+  border-radius: 8px;
+  margin-bottom: 2em;
+}
+.header-bar h1 {
+  color: #fff;
+  border: none;
+  margin: 0 0 8px 0;
+  padding: 0;
+  font-size: 1.8em;
+}
+.header-bar p {
+  color: rgba(255,255,255,0.85);
+  margin: 0;
+  font-size: 15px;
+}
+.header-bar .tags {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.header-bar .tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+}
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+  <h1>LiteLLM on Amazon EKS — 生产级部署指南</h1>
+  <p>多 LLM 网关：统一代理 AWS Bedrock (Claude)、Google Gemini、OpenAI、Azure OpenAI，支持 API Key 管理、缓存、限流、可观测性。</p>
+  <div class="tags">
+    <span class="tag">EKS 1.35</span>
+    <span class="tag">Graviton (ARM64)</span>
+    <span class="tag">Karpenter</span>
+    <span class="tag">Cognito SSO</span>
+    <span class="tag">WAF</span>
+    <span class="tag">Multi-AZ HA</span>
+  </div>
+</div>
+
+<h1 id="litellm-on-amazon-eks-生产级部署文档">LiteLLM on Amazon EKS —
+生产级部署文档</h1>
+<blockquote>
+<p>多 LLM 网关：统一代理 AWS Bedrock (Claude)、Google
+Gemini、OpenAI、Azure OpenAI，<br />
+支持 API Key 管理、缓存、限流、可观测性。</p>
+</blockquote>
+<h2 id="架构概览">架构概览</h2>
+<pre><code>                    ┌─────────────────────────────────────────────────┐
+                    │                   AWS Cloud                     │
+                    │                                                 │
+  User ──HTTPS──▶  │  ALB ──▶ EKS (LiteLLM x3) ──▶ Bedrock Claude  │
+                    │              │    │                              │
+                    │              │    ├──▶ Google Gemini API         │
+                    │              │    ├──▶ OpenAI API                │
+                    │              │    └──▶ Azure OpenAI API          │
+                    │              │                                   │
+                    │              ├──▶ ElastiCache Redis (缓存)       │
+                    │              └──▶ Aurora PostgreSQL (元数据)      │
+                    │                                                 │
+                    │  Secrets Manager ◀── External Secrets Operator  │
+                    └─────────────────────────────────────────────────┘</code></pre>
+<h2 id="组件清单">组件清单</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>组件</th>
+<th>规格</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EKS</td>
+<td>K8s 1.35, 3 AZ</td>
+<td>容器编排</td>
+</tr>
+<tr>
+<td>系统节点组</td>
+<td>2× m7g.large Graviton (Managed NG, min=2/max=3)</td>
+<td>Karpenter controller, CoreDNS, kube-proxy</td>
+</tr>
+<tr>
+<td>工作负载节点组</td>
+<td>Karpenter 自动扩缩 r7g/r6g Graviton (On-Demand)</td>
+<td>LiteLLM Pod (nodeAffinity 限定)</td>
+</tr>
+<tr>
+<td>LiteLLM</td>
+<td>3 副本, <code>litellm-database:main-stable</code></td>
+<td>LLM 代理网关</td>
+</tr>
+<tr>
+<td>Aurora PostgreSQL</td>
+<td>Serverless v2 (0.5–8 ACU)</td>
+<td>用户/Key/用量元数据</td>
+</tr>
+<tr>
+<td>ElastiCache Redis</td>
+<td>cache.r7g.large × 2, TLS+Auth</td>
+<td>响应缓存</td>
+</tr>
+<tr>
+<td>ALB</td>
+<td>Internet-facing, HTTPS (ACM), WAFv2</td>
+<td>入口负载均衡 + 应用层防护</td>
+</tr>
+<tr>
+<td>External Secrets Operator</td>
+<td>Helm chart</td>
+<td>自动同步 Secrets Manager → K8s Secret</td>
+</tr>
+<tr>
+<td>AWS LB Controller</td>
+<td>Helm chart</td>
+<td>管理 ALB Ingress</td>
+</tr>
+</tbody>
+</table>
+<h2 id="前置条件">前置条件</h2>
+<ul>
+<li>AWS CLI v2, <code>eksctl</code>, <code>kubectl</code>,
+<code>helm</code> 已安装</li>
+<li>目标账号有足够 IAM 权限（EKS, EC2, RDS, ElastiCache, SecretsManager,
+IAM, Route53, ACM, ELB）</li>
+<li>已在 ACM 中申请目标域名的 HTTPS 证书</li>
+<li>已有 Route53 Hosted Zone 管理目标域名</li>
+</ul>
+<hr />
+<h2 id="部署步骤">部署步骤</h2>
+<h3 id="配置变量">0. 配置变量</h3>
+<p>编辑 <code>deploy.sh</code> 顶部的变量，替换为你的账号信息：</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="va">ACCOUNT_ID</span><span class="op">=</span><span class="st">&quot;&lt;你的AWS账号ID&gt;&quot;</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="va">REGION</span><span class="op">=</span><span class="st">&quot;&lt;目标区域&gt;&quot;</span>              <span class="co"># 如 us-east-1</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="va">CLUSTER_NAME</span><span class="op">=</span><span class="st">&quot;litellm-cluster&quot;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="va">DOMAIN</span><span class="op">=</span><span class="st">&quot;&lt;你的域名&gt;&quot;</span>              <span class="co"># 如 litellm.example.com</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="va">HOSTED_ZONE_ID</span><span class="op">=</span><span class="st">&quot;&lt;Route53 Zone ID&gt;&quot;</span></span></code></pre></div>
+<p>同时需要修改以下文件中的占位符：</p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>需替换内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>01-serviceaccount.yaml</code></td>
+<td><code>eks.amazonaws.com/role-arn</code> 中的账号 ID</td>
+</tr>
+<tr>
+<td><code>07-ingress.yaml</code></td>
+<td><code>certificate-arn</code> 替换为你的 ACM 证书 ARN</td>
+</tr>
+<tr>
+<td><code>07-ingress.yaml</code></td>
+<td><code>inbound-cidrs</code> 替换为你的允许访问 CIDR</td>
+</tr>
+<tr>
+<td><code>07-ingress.yaml</code></td>
+<td><code>wafv2-acl-arn</code> 替换为你的 WAF WebACL ARN</td>
+</tr>
+<tr>
+<td><code>07-ingress.yaml</code></td>
+<td><code>host</code> 替换为你的域名</td>
+</tr>
+<tr>
+<td><code>iam-policy.json</code></td>
+<td><code>Resource</code> 中的账号 ID 和区域</td>
+</tr>
+<tr>
+<td><code>eksctl-cluster.yaml</code></td>
+<td><code>region</code>, <code>availabilityZones</code></td>
+</tr>
+<tr>
+<td><code>11-karpenter-nodepool.yaml</code></td>
+<td>AZ 列表、集群名</td>
+</tr>
+</tbody>
+</table>
+<h3 id="创建-eks-集群">1. 创建 EKS 集群</h3>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">eksctl</span> create cluster <span class="at">-f</span> eksctl-cluster.yaml</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> eks update-kubeconfig <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span></span></code></pre></div>
+<p>预计耗时 ~15 分钟。</p>
+<h3 id="安装-karpenter-并创建节点池">2. 安装 Karpenter 并创建节点池</h3>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 2a. 给 private 子网和集群安全组打 Karpenter 发现标签</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="va">CLUSTER_SG</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> eks describe-cluster <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&quot;cluster.resourcesVpcConfig.clusterSecurityGroupId&quot;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="va">PRIVATE_SUBNETS</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 describe-subnets <span class="dt">\</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--filters</span> <span class="st">&quot;Name=vpc-id,Values=</span><span class="va">$VPC_ID</span><span class="st">&quot;</span> <span class="st">&quot;Name=tag:kubernetes.io/role/internal-elb,Values=1&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&quot;Subnets[].SubnetId&quot;</span> <span class="at">--output</span> text <span class="at">--region</span> <span class="va">$REGION)</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> subnet <span class="kw">in</span> <span class="va">$PRIVATE_SUBNETS</span><span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>  <span class="ex">aws</span> ec2 create-tags <span class="at">--resources</span> <span class="va">$subnet</span> <span class="at">--tags</span> Key=karpenter.sh/discovery,Value=<span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 create-tags <span class="at">--resources</span> <span class="va">$CLUSTER_SG</span> <span class="at">--tags</span> Key=karpenter.sh/discovery,Value=<span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="co"># 2b. 创建 Karpenter Node IAM 角色</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-role <span class="at">--role-name</span> KarpenterNodeRole-<span class="va">$CLUSTER_NAME</span> <span class="dt">\</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--assume-role-policy-document</span> <span class="st">&#39;{&quot;Version&quot;:&quot;2012-10-17&quot;,&quot;Statement&quot;:[{&quot;Effect&quot;:&quot;Allow&quot;,&quot;Principal&quot;:{&quot;Service&quot;:&quot;ec2.amazonaws.com&quot;},&quot;Action&quot;:&quot;sts:AssumeRole&quot;}]}&#39;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> policy <span class="kw">in</span> AmazonEKSWorkerNodePolicy AmazonEKS_CNI_Policy AmazonEC2ContainerRegistryReadOnly AmazonSSMManagedInstanceCore<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>  <span class="ex">aws</span> iam attach-role-policy <span class="at">--role-name</span> KarpenterNodeRole-<span class="va">$CLUSTER_NAME</span> <span class="at">--policy-arn</span> arn:aws:iam::aws:policy/<span class="va">$policy</span></span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-instance-profile <span class="at">--instance-profile-name</span> KarpenterNodeInstanceProfile-<span class="va">$CLUSTER_NAME</span></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam add-role-to-instance-profile <span class="at">--instance-profile-name</span> KarpenterNodeInstanceProfile-<span class="va">$CLUSTER_NAME</span> <span class="at">--role-name</span> KarpenterNodeRole-<span class="va">$CLUSTER_NAME</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> eks create-access-entry <span class="at">--cluster-name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--principal-arn</span> arn:aws:iam::<span class="va">${ACCOUNT_ID}</span>:role/KarpenterNodeRole-<span class="va">$CLUSTER_NAME</span> <span class="at">--type</span> EC2_LINUX <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a><span class="co"># 2c. 创建 Karpenter Controller IAM 角色 (IRSA)</span></span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a><span class="co"># 参考 iam-policy.json 中的 Karpenter Controller 策略</span></span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a><span class="co"># 2d. Helm 安装 Karpenter</span></span>
+<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a><span class="va">CLUSTER_ENDPOINT</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> eks describe-cluster <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="at">--query</span> <span class="st">&quot;cluster.endpoint&quot;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a><span class="ex">helm</span> upgrade <span class="at">--install</span> karpenter oci://public.ecr.aws/karpenter/karpenter <span class="dt">\</span></span>
+<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a>  <span class="at">--version</span> <span class="st">&quot;1.3.0&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">--namespace</span> kube-system <span class="dt">\</span></span>
+<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> <span class="st">&quot;settings.clusterName=</span><span class="va">$CLUSTER_NAME</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> <span class="st">&quot;settings.clusterEndpoint=</span><span class="va">$CLUSTER_ENDPOINT</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> <span class="st">&quot;serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::</span><span class="va">${ACCOUNT_ID}</span><span class="st">:role/KarpenterControllerRole-</span><span class="va">$CLUSTER_NAME</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-36"><a href="#cb4-36" aria-hidden="true" tabindex="-1"></a>  <span class="at">--wait</span></span>
+<span id="cb4-37"><a href="#cb4-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-38"><a href="#cb4-38" aria-hidden="true" tabindex="-1"></a><span class="co"># 2e. 应用 NodePool 和 EC2NodeClass</span></span>
+<span id="cb4-39"><a href="#cb4-39" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 11-karpenter-nodepool.yaml</span></code></pre></div>
+<h3 id="创建-elasticache-redis">3. 创建 ElastiCache Redis</h3>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 获取 VPC 信息</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="va">VPC_ID</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> eks describe-cluster <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;cluster.resourcesVpcConfig.vpcId&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="va">PRIVATE_SUBNETS</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 describe-subnets <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--filters</span> <span class="st">&quot;Name=vpc-id,Values=</span><span class="va">$VPC_ID</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;Name=tag:kubernetes.io/role/internal-elb,Values=1&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;Subnets[*].SubnetId&#39;</span> <span class="at">--output</span> text <span class="kw">|</span> <span class="fu">tr</span> <span class="st">&#39;\t&#39;</span> <span class="st">&#39;,&#39;</span><span class="va">)</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="va">NODE_SG</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 describe-security-groups <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--filters</span> <span class="st">&quot;Name=vpc-id,Values=</span><span class="va">$VPC_ID</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;Name=tag:aws:eks:cluster-name,Values=</span><span class="va">$CLUSTER_NAME</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;SecurityGroups[0].SecurityGroupId&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建 Redis 安全组（允许 EKS 节点访问 6379）</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="va">REDIS_SG</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 create-security-group <span class="at">--group-name</span> litellm-redis-sg <span class="dt">\</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--description</span> <span class="st">&quot;LiteLLM Redis&quot;</span> <span class="at">--vpc-id</span> <span class="va">$VPC_ID</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;GroupId&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 authorize-security-group-ingress <span class="at">--group-id</span> <span class="va">$REDIS_SG</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--protocol</span> tcp <span class="at">--port</span> 6379 <span class="at">--source-group</span> <span class="va">$NODE_SG</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建子网组</span></span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> elasticache create-cache-subnet-group <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cache-subnet-group-name</span> litellm-redis-subnet <span class="dt">\</span></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cache-subnet-group-description</span> <span class="st">&quot;LiteLLM Redis&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>  <span class="at">--subnet-ids</span> <span class="va">$(</span><span class="bu">echo</span> <span class="va">$PRIVATE_SUBNETS</span> <span class="kw">|</span> <span class="fu">tr</span> <span class="st">&#39;,&#39;</span> <span class="st">&#39; &#39;</span><span class="va">)</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建 Redis 集群</span></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a><span class="va">REDIS_AUTH_TOKEN</span><span class="op">=</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 20<span class="va">)</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> elasticache create-replication-group <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>  <span class="at">--replication-group-id</span> litellm-redis <span class="dt">\</span></span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">--replication-group-description</span> <span class="st">&quot;LiteLLM Redis&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">--engine</span> redis <span class="at">--engine-version</span> 7.1 <span class="dt">\</span></span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cache-node-type</span> cache.r7g.large <span class="dt">\</span></span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">--num-cache-clusters</span> 2 <span class="dt">\</span></span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cache-subnet-group-name</span> litellm-redis-subnet <span class="dt">\</span></span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>  <span class="at">--security-group-ids</span> <span class="va">$REDIS_SG</span> <span class="dt">\</span></span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">--transit-encryption-enabled</span> <span class="dt">\</span></span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>  <span class="at">--auth-token</span> <span class="st">&quot;</span><span class="va">$REDIS_AUTH_TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a>  <span class="at">--at-rest-encryption-enabled</span> <span class="dt">\</span></span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a>  <span class="at">--automatic-failover-enabled</span> <span class="at">--multi-az-enabled</span></span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a><span class="co"># 等待就绪（~10 分钟）</span></span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> elasticache wait replication-group-available <span class="dt">\</span></span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a>  <span class="at">--replication-group-id</span> litellm-redis <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a><span class="va">REDIS_ENDPOINT</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> elasticache describe-replication-groups <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a>  <span class="at">--replication-group-id</span> litellm-redis <span class="dt">\</span></span>
+<span id="cb5-49"><a href="#cb5-49" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;ReplicationGroups[0].NodeGroups[0].PrimaryEndpoint.Address&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb5-50"><a href="#cb5-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-51"><a href="#cb5-51" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Redis: </span><span class="va">$REDIS_ENDPOINT</span><span class="st">&quot;</span></span>
+<span id="cb5-52"><a href="#cb5-52" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Auth Token: </span><span class="va">$REDIS_AUTH_TOKEN</span><span class="st">&quot;</span></span></code></pre></div>
+<h3 id="创建-aurora-postgresql-serverless-v2">4. 创建 Aurora PostgreSQL
+Serverless v2</h3>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># RDS 安全组</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="va">RDS_SG</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 create-security-group <span class="at">--group-name</span> litellm-rds-sg <span class="dt">\</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--description</span> <span class="st">&quot;LiteLLM RDS&quot;</span> <span class="at">--vpc-id</span> <span class="va">$VPC_ID</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;GroupId&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 authorize-security-group-ingress <span class="at">--group-id</span> <span class="va">$RDS_SG</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--protocol</span> tcp <span class="at">--port</span> 5432 <span class="at">--source-group</span> <span class="va">$NODE_SG</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="co"># 子网组</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds create-db-subnet-group <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-subnet-group-name</span> litellm-rds-subnet <span class="dt">\</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-subnet-group-description</span> <span class="st">&quot;LiteLLM RDS&quot;</span> <span class="dt">\</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--subnet-ids</span> <span class="va">$(</span><span class="bu">echo</span> <span class="va">$PRIVATE_SUBNETS</span> <span class="kw">|</span> <span class="fu">tr</span> <span class="st">&#39;,&#39;</span> <span class="st">&#39; &#39;</span><span class="va">)</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Aurora 集群</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="va">DB_PASSWORD</span><span class="op">=</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-base64</span> 24 <span class="kw">|</span> <span class="fu">tr</span> <span class="at">-d</span> <span class="st">&#39;/+=&#39;</span><span class="va">)</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds create-db-cluster <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-cluster-identifier</span> litellm-db <span class="dt">\</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--engine</span> aurora-postgresql <span class="at">--engine-version</span> 16.4 <span class="dt">\</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>  <span class="at">--master-username</span> litellm_admin <span class="dt">\</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--master-user-password</span> <span class="st">&quot;</span><span class="va">$DB_PASSWORD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-subnet-group-name</span> litellm-rds-subnet <span class="dt">\</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--vpc-security-group-ids</span> <span class="va">$RDS_SG</span> <span class="dt">\</span></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">--serverless-v2-scaling-configuration</span> MinCapacity=0.5,MaxCapacity=8 <span class="dt">\</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--storage-encrypted</span> <span class="at">--database-name</span> litellm</span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="co"># Serverless v2 实例</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds create-db-instance <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-instance-identifier</span> litellm-db-instance-1 <span class="dt">\</span></span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-cluster-identifier</span> litellm-db <span class="dt">\</span></span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>  <span class="at">--engine</span> aurora-postgresql <span class="at">--db-instance-class</span> db.serverless</span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a><span class="co"># 等待就绪（~10 分钟）</span></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds wait db-instance-available <span class="dt">\</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-instance-identifier</span> litellm-db-instance-1 <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a><span class="va">RDS_ENDPOINT</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> rds describe-db-clusters <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>  <span class="at">--db-cluster-identifier</span> litellm-db <span class="dt">\</span></span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;DBClusters[0].Endpoint&#39;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a><span class="va">DATABASE_URL</span><span class="op">=</span><span class="st">&quot;postgresql://litellm_admin:</span><span class="va">${DB_PASSWORD}</span><span class="st">@</span><span class="va">${RDS_ENDPOINT}</span><span class="st">:5432/litellm&quot;</span></span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Aurora: </span><span class="va">$RDS_ENDPOINT</span><span class="st">&quot;</span></span></code></pre></div>
+<h3 id="写入-secrets-manager">5. 写入 Secrets Manager</h3>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="va">MASTER_KEY</span><span class="op">=</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 32<span class="va">)</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="va">SALT_KEY</span><span class="op">=</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 16<span class="va">)</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 必需密钥</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/master-key   <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$MASTER_KEY</span><span class="st">&quot;</span>     <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/salt-key     <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$SALT_KEY</span><span class="st">&quot;</span>        <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/database-url <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$DATABASE_URL</span><span class="st">&quot;</span>    <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/redis-host   <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$REDIS_ENDPOINT</span><span class="st">&quot;</span>  <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/redis-password <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$REDIS_AUTH_TOKEN</span><span class="st">&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a><span class="co"># 可选密钥（先用占位符，后续替换真实值）</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/azure-api-key  <span class="at">--secret-string</span> <span class="st">&quot;PLACEHOLDER&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/azure-api-base <span class="at">--secret-string</span> <span class="st">&quot;PLACEHOLDER&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/gemini-api-key <span class="at">--secret-string</span> <span class="st">&quot;PLACEHOLDER&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/openai-api-key <span class="at">--secret-string</span> <span class="st">&quot;PLACEHOLDER&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/ui-password    <span class="at">--secret-string</span> <span class="st">&quot;PLACEHOLDER&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a><span class="co"># SSO 密钥（Cognito OIDC，见&quot;SSO 配置&quot;章节）</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/cognito-client-id     <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$COGNITO_CLIENT_ID</span><span class="st">&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="at">--name</span> litellm/cognito-client-secret <span class="at">--secret-string</span> <span class="st">&quot;</span><span class="va">$COGNITO_CLIENT_SECRET</span><span class="st">&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Master Key: sk-</span><span class="va">$MASTER_KEY</span><span class="st">&quot;</span></span></code></pre></div>
+<blockquote>
+<p>⚠️ 记录 <code>MASTER_KEY</code>，这是调用 LiteLLM API
+的认证密钥。</p>
+</blockquote>
+<h3 id="安装-helm-组件">6. 安装 Helm 组件</h3>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># AWS Load Balancer Controller</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">helm</span> repo add eks https://aws.github.io/eks-charts <span class="kw">&amp;&amp;</span> <span class="ex">helm</span> repo update</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">helm</span> install aws-load-balancer-controller eks/aws-load-balancer-controller <span class="dt">\</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-n</span> kube-system <span class="dt">\</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> clusterName=<span class="va">$CLUSTER_NAME</span> <span class="dt">\</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> serviceAccount.create=false <span class="dt">\</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--set</span> serviceAccount.name=aws-load-balancer-controller</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="co"># External Secrets Operator</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="ex">helm</span> repo add external-secrets https://charts.external-secrets.io</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="ex">helm</span> install external-secrets external-secrets/external-secrets <span class="dt">\</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">-n</span> external-secrets <span class="at">--create-namespace</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Metrics Server（HPA 依赖）</span></span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml</span></code></pre></div>
+<h3 id="创建-irsa-role">7. 创建 IRSA Role</h3>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="va">OIDC_PROVIDER</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> eks describe-cluster <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;cluster.identity.oidc.issuer&#39;</span> <span class="at">--output</span> text <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;s|https://||&#39;</span><span class="va">)</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建信任策略</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> <span class="op">&gt;</span> /tmp/trust-policy.json <span class="op">&lt;&lt;EOF</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="st">{</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;Statement&quot;: [{</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Principal&quot;: {</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Federated&quot;: &quot;arn:aws:iam::</span><span class="va">${ACCOUNT_ID}</span><span class="st">:oidc-provider/</span><span class="va">${OIDC_PROVIDER}</span><span class="st">&quot;</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a><span class="st">    },</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Action&quot;: &quot;sts:AssumeRoleWithWebIdentity&quot;,</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Condition&quot;: {</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;StringEquals&quot;: {</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;</span><span class="va">${OIDC_PROVIDER}</span><span class="st">:sub&quot;: &quot;system:serviceaccount:litellm:litellm-sa&quot;,</span></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;</span><span class="va">${OIDC_PROVIDER}</span><span class="st">:aud&quot;: &quot;sts.amazonaws.com&quot;</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a><span class="st">  }]</span></span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a><span class="st">}</span></span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-role <span class="at">--role-name</span> litellm-irsa-role <span class="dt">\</span></span>
+<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a>  <span class="at">--assume-role-policy-document</span> file:///tmp/trust-policy.json</span>
+<span id="cb9-26"><a href="#cb9-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-27"><a href="#cb9-27" aria-hidden="true" tabindex="-1"></a><span class="co"># 附加权限策略（Bedrock + SecretsManager + CloudWatch）</span></span>
+<span id="cb9-28"><a href="#cb9-28" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam put-role-policy <span class="at">--role-name</span> litellm-irsa-role <span class="dt">\</span></span>
+<span id="cb9-29"><a href="#cb9-29" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-name</span> litellm-policy <span class="at">--policy-document</span> file://iam-policy.json</span>
+<span id="cb9-30"><a href="#cb9-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-31"><a href="#cb9-31" aria-hidden="true" tabindex="-1"></a><span class="co"># ⚠️ 重要：Bedrock foundation-model ARN 不含账号 ID，需额外添加</span></span>
+<span id="cb9-32"><a href="#cb9-32" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam put-role-policy <span class="at">--role-name</span> litellm-irsa-role <span class="dt">\</span></span>
+<span id="cb9-33"><a href="#cb9-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-name</span> litellm-bedrock-models <span class="dt">\</span></span>
+<span id="cb9-34"><a href="#cb9-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-document</span> <span class="st">&#39;{</span></span>
+<span id="cb9-35"><a href="#cb9-35" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb9-36"><a href="#cb9-36" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Statement&quot;: [{</span></span>
+<span id="cb9-37"><a href="#cb9-37" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb9-38"><a href="#cb9-38" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Action&quot;: [&quot;bedrock:InvokeModel&quot;, &quot;bedrock:InvokeModelWithResponseStream&quot;],</span></span>
+<span id="cb9-39"><a href="#cb9-39" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Resource&quot;: [&quot;arn:aws:bedrock:*::foundation-model/*&quot;]</span></span>
+<span id="cb9-40"><a href="#cb9-40" aria-hidden="true" tabindex="-1"></a><span class="st">    }]</span></span>
+<span id="cb9-41"><a href="#cb9-41" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<h3 id="部署-k8s-资源">8. 部署 K8s 资源</h3>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 00-namespace.yaml</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="co"># ⚠️ 关键：放宽 PodSecurity 到 baseline（LiteLLM 镜像需要 root 运行 Prisma）</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> label ns litellm <span class="dt">\</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>  pod-security.kubernetes.io/enforce=baseline <span class="dt">\</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  pod-security.kubernetes.io/warn=baseline <span class="at">--overwrite</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 01-serviceaccount.yaml</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 02-secretstore.yaml</span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 03-externalsecret.yaml</span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 04-configmap.yaml</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 05-deployment.yaml</span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 06-service.yaml</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 07-ingress.yaml</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 08-hpa.yaml</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 09-pdb.yaml</span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 10-networkpolicy.yaml</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a><span class="co"># 等待就绪</span></span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> rollout status deployment/litellm <span class="at">-n</span> litellm <span class="at">--timeout</span><span class="op">=</span>300s</span></code></pre></div>
+<h3 id="配置-route53-dns">9. 配置 Route53 DNS</h3>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="va">ALB_DNS</span><span class="op">=</span><span class="va">$(</span><span class="ex">kubectl</span> get ingress litellm <span class="at">-n</span> litellm <span class="dt">\</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> jsonpath=<span class="st">&#39;{.status.loadBalancer.ingress[0].hostname}&#39;</span><span class="va">)</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="va">ALB_ZONE</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> elbv2 describe-load-balancers <span class="at">--region</span> <span class="va">$REGION</span> <span class="dt">\</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&quot;LoadBalancers[?DNSName==&#39;</span><span class="va">$ALB_DNS</span><span class="st">&#39;].CanonicalHostedZoneId&quot;</span> <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> route53 change-resource-record-sets <span class="at">--hosted-zone-id</span> <span class="va">$HOSTED_ZONE_ID</span> <span class="dt">\</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--change-batch</span> <span class="st">&quot;{</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a><span class="st">    </span><span class="dt">\&quot;</span><span class="st">Changes</span><span class="dt">\&quot;</span><span class="st">: [{</span></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a><span class="st">      </span><span class="dt">\&quot;</span><span class="st">Action</span><span class="dt">\&quot;</span><span class="st">: </span><span class="dt">\&quot;</span><span class="st">UPSERT</span><span class="dt">\&quot;</span><span class="st">,</span></span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a><span class="st">      </span><span class="dt">\&quot;</span><span class="st">ResourceRecordSet</span><span class="dt">\&quot;</span><span class="st">: {</span></span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a><span class="st">        </span><span class="dt">\&quot;</span><span class="st">Name</span><span class="dt">\&quot;</span><span class="st">: </span><span class="dt">\&quot;</span><span class="va">$DOMAIN</span><span class="dt">\&quot;</span><span class="st">,</span></span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a><span class="st">        </span><span class="dt">\&quot;</span><span class="st">Type</span><span class="dt">\&quot;</span><span class="st">: </span><span class="dt">\&quot;</span><span class="st">A</span><span class="dt">\&quot;</span><span class="st">,</span></span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a><span class="st">        </span><span class="dt">\&quot;</span><span class="st">AliasTarget</span><span class="dt">\&quot;</span><span class="st">: {</span></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a><span class="st">          </span><span class="dt">\&quot;</span><span class="st">HostedZoneId</span><span class="dt">\&quot;</span><span class="st">: </span><span class="dt">\&quot;</span><span class="va">$ALB_ZONE</span><span class="dt">\&quot;</span><span class="st">,</span></span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a><span class="st">          </span><span class="dt">\&quot;</span><span class="st">DNSName</span><span class="dt">\&quot;</span><span class="st">: </span><span class="dt">\&quot;</span><span class="st">dualstack.</span><span class="va">$ALB_DNS</span><span class="dt">\&quot;</span><span class="st">,</span></span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a><span class="st">          </span><span class="dt">\&quot;</span><span class="st">EvaluateTargetHealth</span><span class="dt">\&quot;</span><span class="st">: true</span></span>
+<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a><span class="st">        }</span></span>
+<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a><span class="st">    }]</span></span>
+<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a><span class="st">  }&quot;</span></span></code></pre></div>
+<h3 id="验证">10. 验证</h3>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 健康检查</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sk</span> https://<span class="va">$DOMAIN</span>/health/readiness</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 期望输出：{&quot;status&quot;:&quot;connected&quot;,&quot;db&quot;:&quot;connected&quot;,&quot;cache&quot;:&quot;redis&quot;,...}</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 调用 Claude</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sk</span> https://<span class="va">$DOMAIN</span>/v1/chat/completions <span class="dt">\</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer sk-</span><span class="va">$MASTER_KEY</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{</span></span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;model&quot;: &quot;claude-3-5-sonnet&quot;,</span></span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Hello&quot;}]</span></span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<hr />
+<h2 id="文件清单">文件清单</h2>
+<pre><code>litellm-eks/
+├── deploy.sh                    # 一键部署脚本（包含所有步骤）
+├── eksctl-cluster.yaml          # EKS 集群定义
+├── iam-policy.json              # IRSA IAM 权限策略
+├── 00-namespace.yaml            # Namespace
+├── 01-serviceaccount.yaml       # ServiceAccount (IRSA)
+├── 02-secretstore.yaml          # ESO SecretStore
+├── 03-externalsecret.yaml       # ESO ExternalSecret (12 个密钥)
+├── 04-configmap.yaml            # LiteLLM 配置（模型列表、路由、缓存）
+├── 05-deployment.yaml           # Deployment (3 副本, 反亲和, 探针)
+├── 06-service.yaml              # ClusterIP Service
+├── 07-ingress.yaml              # ALB Ingress (HTTPS, CIDR 限制)
+├── 08-hpa.yaml                  # HPA (CPU 65% / Memory 75%, 3-20 副本)
+├── 09-pdb.yaml                  # PDB (最少 2 可用)
+├── 10-networkpolicy.yaml        # NetworkPolicy (零信任)
+└── 11-karpenter-nodepool.yaml   # Karpenter v1.3.0 NodePool + EC2NodeClass</code></pre>
+<hr />
+<h2 id="踩坑记录-注意事项">踩坑记录 &amp; 注意事项</h2>
+<h3 id="必须注意">🔴 必须注意</h3>
+<table>
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 33%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>#</th>
+<th>问题</th>
+<th>解决方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Prisma query engine 权限</strong> — LiteLLM 镜像在构建时以
+root 安装 Prisma binary 到
+<code>/root/.cache/prisma-python/</code>，<code>runAsUser: 1000</code>
+无法访问</td>
+<td>使用 <code>litellm-database</code> 镜像 + PodSecurity 设为
+<code>baseline</code> + 不设 <code>runAsUser</code>（以 root 运行）</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Bedrock foundation-model ARN</strong> — 格式为
+<code>arn:aws:bedrock:*::foundation-model/*</code>（无账号
+ID，双冒号）</td>
+<td>IAM 策略中 Resource 不能包含账号 ID</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>NetworkPolicy 阻断 ALB→Pod</strong> — ALB 通过 VPC IP 直连
+Pod（target-type: ip），不经过 kube-system namespace</td>
+<td>ingress 规则需添加 <code>ipBlock: &lt;VPC CIDR&gt;</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>NetworkPolicy 阻断 Pod→ElastiCache/RDS</strong> — Redis/RDS
+在 VPC 内但不在 K8s namespace 中</td>
+<td>egress 规则用 <code>ipBlock: &lt;VPC CIDR&gt;</code> 而非
+<code>namespaceSelector</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong><code>--detailed_debug False</code> 参数</strong> — LiteLLM
+不支持此 CLI 参数，会导致启动崩溃</td>
+<td>不要添加此参数</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>ALB access_logs 注解</strong> — 如果指定的 S3 bucket
+不存在，ALB Controller 会 reconcile 失败</td>
+<td>要么先创建 bucket，要么不加 access_logs 注解</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Karpenter v1.3.0 API 变更</strong> —
+<code>nodeClassRef.apiVersion</code>
+字段已移除，<code>consolidationPolicy</code> 值
+<code>WhenUnderutilized</code> 改为
+<code>WhenEmptyOrUnderutilized</code></td>
+<td>使用 <code>nodeClassRef.group: karpenter.k8s.aws</code>
+替代；EC2NodeClass 必须包含 <code>amiSelectorTerms</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>Karpenter 子网/安全组发现</strong> — NodeClaim
+创建失败，找不到子网或安全组</td>
+<td>必须给 private 子网和集群安全组打
+<code>karpenter.sh/discovery=&lt;cluster-name&gt;</code> 标签</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>Karpenter 不能运行在自己管理的节点上</strong> — nodeAffinity
+要求 <code>karpenter.sh/nodepool DoesNotExist</code>，纯 Karpenter
+集群无法启动</td>
+<td>必须保留 Managed Node Group (min=2) 作为系统节点，运行 Karpenter
+controller；LiteLLM Deployment 需添加
+<code>nodeAffinity: karpenter.sh/nodepool Exists</code>
+避免调度到系统节点</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>AWS LB Controller IMDS 失败</strong> — 切换到 Graviton
+节点后，LB Controller 无法从 EC2 Instance Metadata 获取 VPC
+ID，CrashLoopBackOff</td>
+<td>启动参数添加 <code>--aws-vpc-id=&lt;VPC_ID&gt;</code> 显式指定 VPC
+ID</td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>SSO 免费限制</strong> — LiteLLM SSO 功能免费仅限 5
+用户（v1.76.0+），超过需 Enterprise License</td>
+<td>评估用户数，必要时申请 License</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="waf-配置">WAF 配置</h2>
+<p>ALB 已关联 WAFv2 WebACL，提供三层应用层防护：</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>规则</th>
+<th>模式</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AWS Managed Core Rule Set</td>
+<td>Count（仅记录）</td>
+<td>SQL 注入、XSS、路径遍历等 OWASP Top 10</td>
+</tr>
+<tr>
+<td>AWS Managed Known Bad Inputs</td>
+<td>Count（仅记录）</td>
+<td>已知恶意请求模式</td>
+</tr>
+<tr>
+<td>Rate Limit 1000/5min</td>
+<td>Block（拦截）</td>
+<td>单 IP 每 5 分钟超 1000 次请求则拦截</td>
+</tr>
+</tbody>
+</table>
+<p><strong>创建 WAF WebACL</strong>：</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建 WAFv2 WebACL（Core Rule Set Count + Known Bad Inputs Count + Rate Limit Block）</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> wafv2 create-web-acl <span class="dt">\</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--name</span> litellm-waf <span class="dt">\</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--scope</span> REGIONAL <span class="dt">\</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--default-action</span> Allow={} <span class="dt">\</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--rules</span> <span class="st">&#39;[</span></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="st">    {&quot;Name&quot;:&quot;AWS-AWSManagedRulesCommonRuleSet&quot;,&quot;Priority&quot;:1,&quot;OverrideAction&quot;:{&quot;Count&quot;:{}},&quot;Statement&quot;:{&quot;ManagedRuleGroupStatement&quot;:{&quot;VendorName&quot;:&quot;AWS&quot;,&quot;Name&quot;:&quot;AWSManagedRulesCommonRuleSet&quot;}},&quot;VisibilityConfig&quot;:{&quot;SampledRequestsEnabled&quot;:true,&quot;CloudWatchMetricsEnabled&quot;:true,&quot;MetricName&quot;:&quot;CommonRuleSet&quot;}},</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a><span class="st">    {&quot;Name&quot;:&quot;AWS-AWSManagedRulesKnownBadInputsRuleSet&quot;,&quot;Priority&quot;:2,&quot;OverrideAction&quot;:{&quot;Count&quot;:{}},&quot;Statement&quot;:{&quot;ManagedRuleGroupStatement&quot;:{&quot;VendorName&quot;:&quot;AWS&quot;,&quot;Name&quot;:&quot;AWSManagedRulesKnownBadInputsRuleSet&quot;}},&quot;VisibilityConfig&quot;:{&quot;SampledRequestsEnabled&quot;:true,&quot;CloudWatchMetricsEnabled&quot;:true,&quot;MetricName&quot;:&quot;KnownBadInputs&quot;}},</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a><span class="st">    {&quot;Name&quot;:&quot;RateLimit-1000-per-IP&quot;,&quot;Priority&quot;:3,&quot;Action&quot;:{&quot;Block&quot;:{}},&quot;Statement&quot;:{&quot;RateBasedStatement&quot;:{&quot;Limit&quot;:1000,&quot;EvaluationWindowSec&quot;:300,&quot;AggregateKeyType&quot;:&quot;IP&quot;}},&quot;VisibilityConfig&quot;:{&quot;SampledRequestsEnabled&quot;:true,&quot;CloudWatchMetricsEnabled&quot;:true,&quot;MetricName&quot;:&quot;RateLimit&quot;}}</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a><span class="st">  ]&#39;</span> <span class="dt">\</span></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--visibility-config</span> SampledRequestsEnabled=true,CloudWatchMetricsEnabled=true,MetricName=litellm-waf <span class="dt">\</span></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tags</span> Key=Project,Value=litellm <span class="dt">\</span></span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--region</span> us-east-1</span></code></pre></div>
+<p>将返回的 ARN 填入 <code>07-ingress.yaml</code> 的
+<code>wafv2-acl-arn</code> 注解，然后 <code>kubectl apply</code>。</p>
+<p><strong>观察与切换</strong>：在 CloudWatch 中观察
+<code>CommonRuleSet</code> 和 <code>KnownBadInputs</code>
+指标，确认无误报后将 Count 切换为 Block。 | 7 | <strong>Rolling Update
+限制</strong> — hard podAntiAffinity + 节点数 =
+副本数时，无法滚动更新（没有空闲节点放新 Pod） | 更新时先
+<code>kubectl scale deployment/litellm --replicas=0 -n litellm</code> 再
+<code>scale --replicas=3</code>，或增加节点数到 &gt; 副本数 |</p>
+<h3 id="建议">🟡 建议</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>项目</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>镜像版本</strong></td>
+<td>生产环境建议锁定具体版本（如 <code>v1.81.14</code>）而非
+<code>main-stable</code></td>
+</tr>
+<tr>
+<td><strong>Claude 模型</strong></td>
+<td>Claude 3.5 Sonnet v2 已标记 Legacy，建议使用 Claude Sonnet 4</td>
+</tr>
+<tr>
+<td><strong>LITELLM_MIGRATION_DIR</strong></td>
+<td>设为 <code>/tmp/migrations</code>，避免写入只读的 site-packages
+目录</td>
+</tr>
+<tr>
+<td><strong>HOME 环境变量</strong></td>
+<td>设为 <code>/tmp</code>，确保 Prisma CLI 的缓存写入可写目录</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="模型配置">模型配置</h2>
+<p>在 <code>04-configmap.yaml</code> 中配置模型列表。当前支持：</p>
+<h3 id="aws-bedrock-claude-模型irsa-认证无需-api-key">AWS Bedrock Claude
+模型（IRSA 认证，无需 API Key）</h3>
+<table>
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 50%" />
+<col style="width: 18%" />
+</colgroup>
+<thead>
+<tr>
+<th>模型别名</th>
+<th>Bedrock 模型 ID</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bedrock-claude-sonnet46</code></td>
+<td><code>bedrock/us.anthropic.claude-sonnet-4-6</code></td>
+<td>Claude Sonnet 4.6（最新）</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-sonnet45</code></td>
+<td><code>bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0</code></td>
+<td>Claude Sonnet 4.5</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-sonnet4</code></td>
+<td><code>bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0</code></td>
+<td>Claude Sonnet 4</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-opus46</code></td>
+<td><code>bedrock/us.anthropic.claude-opus-4-6-v1</code></td>
+<td>Claude Opus 4.6</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-opus45</code></td>
+<td><code>bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0</code></td>
+<td>Claude Opus 4.5</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-haiku45</code></td>
+<td><code>bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0</code></td>
+<td>Claude Haiku 4.5</td>
+</tr>
+<tr>
+<td><code>bedrock-claude-haiku35</code></td>
+<td><code>bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0</code></td>
+<td>Claude 3.5 Haiku</td>
+</tr>
+</tbody>
+</table>
+<h3 id="aws-bedrock-nova-模型irsa-认证">AWS Bedrock Nova 模型（IRSA
+认证）</h3>
+<table>
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 50%" />
+<col style="width: 18%" />
+</colgroup>
+<thead>
+<tr>
+<th>模型别名</th>
+<th>Bedrock 模型 ID</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bedrock-nova-premier</code></td>
+<td><code>bedrock/us.amazon.nova-premier-v1:0</code></td>
+<td>Nova Premier</td>
+</tr>
+<tr>
+<td><code>bedrock-nova-pro</code></td>
+<td><code>bedrock/us.amazon.nova-pro-v1:0</code></td>
+<td>Nova Pro</td>
+</tr>
+<tr>
+<td><code>bedrock-nova-lite</code></td>
+<td><code>bedrock/us.amazon.nova-lite-v1:0</code></td>
+<td>Nova Lite</td>
+</tr>
+<tr>
+<td><code>bedrock-nova-micro</code></td>
+<td><code>bedrock/us.amazon.nova-micro-v1:0</code></td>
+<td>Nova Micro</td>
+</tr>
+</tbody>
+</table>
+<h3 id="其他-llm-提供商需-api-key">其他 LLM 提供商（需 API Key）</h3>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 23%" />
+<col style="width: 26%" />
+<col style="width: 23%" />
+</colgroup>
+<thead>
+<tr>
+<th>模型别名</th>
+<th>实际模型</th>
+<th>Provider</th>
+<th>认证方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gpt-4o</code></td>
+<td>Azure GPT-4o</td>
+<td>Azure OpenAI</td>
+<td><code>AZURE_API_KEY</code> + <code>AZURE_API_BASE</code></td>
+</tr>
+<tr>
+<td><code>gemini-2.0-flash</code></td>
+<td>Gemini 2.0 Flash</td>
+<td>Google</td>
+<td><code>GEMINI_API_KEY</code></td>
+</tr>
+<tr>
+<td><code>gemini-2.5-pro</code></td>
+<td>Gemini 2.5 Pro Preview</td>
+<td>Google</td>
+<td><code>GEMINI_API_KEY</code></td>
+</tr>
+<tr>
+<td><code>gpt-4o-openai</code></td>
+<td>GPT-4o</td>
+<td>OpenAI</td>
+<td><code>OPENAI_API_KEY</code></td>
+</tr>
+<tr>
+<td><code>o3-mini</code></td>
+<td>o3-mini</td>
+<td>OpenAI</td>
+<td><code>OPENAI_API_KEY</code></td>
+</tr>
+</tbody>
+</table>
+<p>添加新模型只需编辑 ConfigMap 并重启 Pod：</p>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> edit configmap litellm-config <span class="at">-n</span> litellm</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> rollout restart deployment/litellm <span class="at">-n</span> litellm</span></code></pre></div>
+<hr />
+<h2 id="sso-配置cognito-oidc">SSO 配置（Cognito OIDC）</h2>
+<p>管理界面（<code>/ui</code>）通过 AWS Cognito SSO 认证，API 调用仍使用
+Master Key / per-user Key。</p>
+<h3 id="组件">组件</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>组件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cognito User Pool</td>
+<td><code>&lt;YOUR_USER_POOL_ID&gt;</code></td>
+</tr>
+<tr>
+<td>Cognito Domain</td>
+<td><code>&lt;YOUR_COGNITO_DOMAIN&gt;.auth.&lt;REGION&gt;.amazoncognito.com</code></td>
+</tr>
+<tr>
+<td>Callback URL</td>
+<td><code>https://&lt;YOUR_DOMAIN&gt;/sso/callback</code></td>
+</tr>
+<tr>
+<td>回退登录</td>
+<td><code>https://&lt;YOUR_DOMAIN&gt;/fallback/login</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="角色映射">角色映射</h3>
+<p>Cognito 默认在 JWT 中包含 <code>cognito:groups</code> claim，LiteLLM
+直接读取该字段映射角色（无需 Lambda）。</p>
+<table>
+<thead>
+<tr>
+<th>Cognito 组</th>
+<th>LiteLLM 角色</th>
+<th>权限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>admin</code></td>
+<td><code>proxy_admin</code></td>
+<td>完全管理（用户、模型、Key、配额）</td>
+</tr>
+<tr>
+<td><code>viewer</code></td>
+<td><code>proxy_admin_viewer</code></td>
+<td>管理界面只读</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td><code>internal_user</code></td>
+<td>创建/管理自己的 API Key</td>
+</tr>
+<tr>
+<td><code>user_viewer</code></td>
+<td><code>internal_user_viewer</code></td>
+<td>只能查看自己的 Key</td>
+</tr>
+</tbody>
+</table>
+<h3 id="用户管理">用户管理</h3>
+<p>通过 AWS Console（Cognito → User pools →
+<code>&lt;YOUR_POOL_NAME&gt;</code>）或 CLI：</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 创建用户</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cognito-idp admin-create-user <span class="at">--user-pool-id</span> <span class="va">$USER_POOL_ID</span> <span class="dt">\</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--username</span> <span class="op">&lt;</span>用户名<span class="op">&gt;</span> --user-attributes Name=email,Value=<span class="op">&lt;</span>邮箱<span class="op">&gt;</span> Name=email_verified,Value=true <span class="dt">\</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 设置密码</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cognito-idp admin-set-user-password <span class="at">--user-pool-id</span> <span class="va">$USER_POOL_ID</span> <span class="dt">\</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--username</span> <span class="op">&lt;</span>用户名<span class="op">&gt;</span> --password <span class="st">&#39;&lt;密码&gt;&#39;</span> <span class="at">--permanent</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a><span class="co"># 分配组</span></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cognito-idp admin-add-user-to-group <span class="at">--user-pool-id</span> <span class="va">$USER_POOL_ID</span> <span class="dt">\</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--username</span> <span class="op">&lt;</span>用户名<span class="op">&gt;</span> --group-name admin <span class="at">--region</span> <span class="va">$REGION</span></span></code></pre></div>
+<hr />
+<h2 id="运维命令">运维命令</h2>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 查看 Pod 状态</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> get pods <span class="at">-n</span> litellm</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 查看日志</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> logs <span class="at">-n</span> litellm <span class="at">-l</span> app=litellm <span class="at">--tail</span><span class="op">=</span>100</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 健康检查</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sk</span> https://<span class="va">$DOMAIN</span>/health/readiness</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a><span class="co"># 更新部署（滚动更新，零停机）</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> apply <span class="at">-f</span> 05-deployment.yaml</span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> rollout restart deployment/litellm <span class="at">-n</span> litellm</span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 注意：如果工作节点数 = 副本数（无空闲节点），hard podAntiAffinity 会导致</span></span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a><span class="co"># 滚动更新卡住，此时需要 scale 0→3 或增加节点</span></span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 更新 API Key</span></span>
+<span id="cb17-17"><a href="#cb17-17" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager put-secret-value <span class="at">--secret-id</span> litellm/openai-api-key <span class="dt">\</span></span>
+<span id="cb17-18"><a href="#cb17-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--secret-string</span> <span class="st">&quot;sk-your-real-key&quot;</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb17-19"><a href="#cb17-19" aria-hidden="true" tabindex="-1"></a><span class="co"># ESO 每小时自动同步，或手动触发：</span></span>
+<span id="cb17-20"><a href="#cb17-20" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> delete secret litellm-secrets <span class="at">-n</span> litellm</span>
+<span id="cb17-21"><a href="#cb17-21" aria-hidden="true" tabindex="-1"></a><span class="co"># ExternalSecret 会自动重建</span></span>
+<span id="cb17-22"><a href="#cb17-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-23"><a href="#cb17-23" aria-hidden="true" tabindex="-1"></a><span class="co"># 查看 HPA 状态</span></span>
+<span id="cb17-24"><a href="#cb17-24" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> get hpa <span class="at">-n</span> litellm</span>
+<span id="cb17-25"><a href="#cb17-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-26"><a href="#cb17-26" aria-hidden="true" tabindex="-1"></a><span class="co"># 查看 ALB 状态</span></span>
+<span id="cb17-27"><a href="#cb17-27" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> get ingress <span class="at">-n</span> litellm</span></code></pre></div>
+<hr />
+<h2 id="清理">清理</h2>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 K8s 资源</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> delete <span class="at">-f</span> 07-ingress.yaml</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> delete <span class="at">-f</span> 05-deployment.yaml</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> delete ns litellm</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 ElastiCache</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> elasticache delete-replication-group <span class="at">--replication-group-id</span> litellm-redis <span class="dt">\</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--no-final-snapshot-identifier</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 Aurora</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds delete-db-instance <span class="at">--db-instance-identifier</span> litellm-db-instance-1 <span class="dt">\</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--skip-final-snapshot</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> rds delete-db-cluster <span class="at">--db-cluster-identifier</span> litellm-db <span class="dt">\</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--skip-final-snapshot</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 Secrets Manager</span></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> s <span class="kw">in</span> master-key salt-key database-url redis-host redis-password <span class="dt">\</span></span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>         azure-api-key azure-api-base gemini-api-key openai-api-key ui-password <span class="dt">\</span></span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>         cognito-client-id cognito-client-secret<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a>  <span class="ex">aws</span> secretsmanager delete-secret <span class="at">--secret-id</span> <span class="st">&quot;litellm/</span><span class="va">$s</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">--force-delete-without-recovery</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 IAM Role</span></span>
+<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam delete-role-policy <span class="at">--role-name</span> litellm-irsa-role <span class="at">--policy-name</span> litellm-policy</span>
+<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam delete-role-policy <span class="at">--role-name</span> litellm-irsa-role <span class="at">--policy-name</span> litellm-bedrock-models</span>
+<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam delete-role <span class="at">--role-name</span> litellm-irsa-role</span>
+<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-29"><a href="#cb18-29" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 EKS 集群</span></span>
+<span id="cb18-30"><a href="#cb18-30" aria-hidden="true" tabindex="-1"></a><span class="ex">eksctl</span> delete cluster <span class="at">--name</span> <span class="va">$CLUSTER_NAME</span> <span class="at">--region</span> <span class="va">$REGION</span></span>
+<span id="cb18-31"><a href="#cb18-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-32"><a href="#cb18-32" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除 Route53 记录（手动在控制台或 CLI）</span></span>
+<span id="cb18-33"><a href="#cb18-33" aria-hidden="true" tabindex="-1"></a><span class="co"># 删除安全组（VPC 删除后自动清理）</span></span></code></pre></div>
+</body></html>
