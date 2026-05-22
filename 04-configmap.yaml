@@ -10,17 +10,9 @@ data:
     # ============================================================
     model_list:
       # ── AWS Bedrock Claude (IRSA, no API key needed) ──
-      - model_name: bedrock-claude-sonnet46
+      - model_name: bedrock-claude-opus47
         litellm_params:
-          model: bedrock/us.anthropic.claude-sonnet-4-6
-          aws_region_name: us-east-1
-      - model_name: bedrock-claude-sonnet45
-        litellm_params:
-          model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-          aws_region_name: us-east-1
-      - model_name: bedrock-claude-sonnet4
-        litellm_params:
-          model: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0
+          model: bedrock/us.anthropic.claude-opus-4-7
           aws_region_name: us-east-1
       - model_name: bedrock-claude-opus46
         litellm_params:
@@ -30,14 +22,23 @@ data:
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0
           aws_region_name: us-east-1
+      - model_name: bedrock-claude-sonnet46
+        litellm_params:
+          model: bedrock/us.anthropic.claude-sonnet-4-6
+          aws_region_name: us-east-1
+      # 1M context variant — enabled via anthropic-beta header
+      - model_name: bedrock-claude-sonnet46-1m
+        litellm_params:
+          model: bedrock/us.anthropic.claude-sonnet-4-6
+          aws_region_name: us-east-1
+          extra_headers:
+            anthropic-beta: "context-1m-2025-08-07"
       - model_name: bedrock-claude-haiku45
         litellm_params:
           model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
           aws_region_name: us-east-1
-      - model_name: bedrock-claude-haiku35
-        litellm_params:
-          model: bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0
-          aws_region_name: us-east-1
+          # Haiku 4.5 不支持 extended thinking，丢弃该参数避免 400
+          additional_drop_params: ["thinking"]
 
       # ── AWS Bedrock Nova ──
       - model_name: bedrock-nova-premier
