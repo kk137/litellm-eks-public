@@ -507,13 +507,12 @@ aws wafv2 create-web-acl \
 
 | 模型别名 | Bedrock 模型 ID | 说明 |
 |----------|----------------|------|
-| `bedrock-claude-sonnet46` | `bedrock/us.anthropic.claude-sonnet-4-6` | Claude Sonnet 4.6（最新） |
-| `bedrock-claude-sonnet45` | `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` | Claude Sonnet 4.5 |
-| `bedrock-claude-sonnet4` | `bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0` | Claude Sonnet 4 |
-| `bedrock-claude-opus46` | `bedrock/us.anthropic.claude-opus-4-6-v1` | Claude Opus 4.6 |
+| `bedrock-claude-opus47` | `bedrock/us.anthropic.claude-opus-4-7` | Claude Opus 4.7（最新，1M context） |
+| `bedrock-claude-opus46` | `bedrock/us.anthropic.claude-opus-4-6-v1` | Claude Opus 4.6（1M context） |
 | `bedrock-claude-opus45` | `bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0` | Claude Opus 4.5 |
+| `bedrock-claude-sonnet46` | `bedrock/us.anthropic.claude-sonnet-4-6` | Claude Sonnet 4.6 |
+| `bedrock-claude-sonnet46-1m` | 同上 + `anthropic-beta: context-1m-2025-08-07` | Sonnet 4.6（1M context 变体） |
 | `bedrock-claude-haiku45` | `bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0` | Claude Haiku 4.5 |
-| `bedrock-claude-haiku35` | `bedrock/us.anthropic.claude-3-5-haiku-20241022-v1:0` | Claude 3.5 Haiku |
 
 ### AWS Bedrock Nova 模型（IRSA 认证）
 
