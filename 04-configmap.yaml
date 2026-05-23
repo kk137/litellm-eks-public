@@ -38,6 +38,7 @@ data:
           model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
           aws_region_name: us-east-1
           # Haiku 4.5 不支持 extended thinking，丢弃该参数避免 400
+          drop_params: true
           additional_drop_params: ["thinking"]
 
       # ── AWS Bedrock Nova ──
