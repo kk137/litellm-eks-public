@@ -14,23 +14,33 @@ data:
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-7
           aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
       - model_name: bedrock-claude-opus46
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-6-v1
           aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
       - model_name: bedrock-claude-opus45
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0
           aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
       - model_name: bedrock-claude-sonnet46
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
       # 1M context variant — enabled via anthropic-beta header
       - model_name: bedrock-claude-sonnet46-1m
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
           extra_headers:
             anthropic-beta: "context-1m-2025-08-07"
       - model_name: bedrock-claude-haiku45
