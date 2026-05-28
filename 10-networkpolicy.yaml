@@ -77,3 +77,51 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+
+    # SearXNG (WebSearch Interception)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: searxng
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# NetworkPolicy for SearXNG: only LiteLLM can reach it, egress to DNS + HTTPS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng-allow
+  namespace: litellm
+spec:
+  podSelector:
+    matchLabels:
+      app: searxng
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: litellm
+      ports:
+        - port: 8080
+          protocol: TCP
+
+  egress:
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS to external search engines
+    - ports:
+        - port: 443
+          protocol: TCP
+    # HTTP fallback (some search engines)
+    - ports:
+        - port: 80
+          protocol: TCP
