@@ -123,12 +123,27 @@ data:
           - acompletion
           - completion
           - embedding
-      # Callbacks for observability
-      success_callback: ["prometheus"]
-      failure_callback: ["prometheus"]
+      # Callbacks: must use "callbacks" (not success_callback) to enable handler instantiation
+      callbacks:
+        - "prometheus"
+        - "websearch_interception"
+      websearch_interception_params:
+        enabled_providers:
+          - bedrock
+          - bedrock_converse
+        search_tool_name: searxng-search
       # Request/response logging (set to false in prod if PII concern)
       set_verbose: false
       json_logs: true
+
+    # ============================================================
+    # Search Tools — SearXNG for WebSearch Interception
+    # ============================================================
+    search_tools:
+      - search_tool_name: searxng-search
+        litellm_params:
+          search_provider: searxng
+          api_base: http://searxng:8080
 
     # ============================================================
     # General / Proxy Settings

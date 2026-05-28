@@ -94,8 +94,7 @@ spec:
       containers:
         - name: litellm
           # Pin to a specific version — never use :latest or moving tags in production
-          # Current: v1.83.14-stable.patch.3 (upgraded from v1.83.10-stable on 2026-05-11)
-          image: ghcr.io/berriai/litellm-database:v1.83.14-stable.patch.3
+          image: ghcr.io/berriai/litellm-database:v1.86.2
           imagePullPolicy: IfNotPresent
 
           args:
@@ -174,6 +173,8 @@ spec:
           env:
             - name: LITELLM_LOG
               value: "INFO"
+            - name: SEARXNG_API_BASE
+              value: "http://searxng:8080"
             - name: PRISMA_BINARY_CACHE_DIR
               value: "/tmp/prisma"
             - name: HOME
