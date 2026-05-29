@@ -10,32 +10,41 @@ data:
     # ============================================================
     model_list:
       # ── AWS Bedrock Claude (IRSA, no API key needed) ──
-      - model_name: bedrock-claude-opus47
+      - model_name: claude-bedrock-opus47
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-7
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
-      - model_name: bedrock-claude-opus46
+      - model_name: claude-bedrock-opus46
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-6-v1
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
-      - model_name: bedrock-claude-opus45
+      # 1M context variant — enabled via anthropic-beta header
+      - model_name: claude-bedrock-opus46-1m
+        litellm_params:
+          model: bedrock/us.anthropic.claude-opus-4-6-v1
+          aws_region_name: us-east-1
+          stream_timeout: 900
+          timeout: 900
+          extra_headers:
+            anthropic-beta: "context-1m-2025-08-07"
+      - model_name: claude-bedrock-opus45
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
-      - model_name: bedrock-claude-sonnet46
+      - model_name: claude-bedrock-sonnet46
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
       # 1M context variant — enabled via anthropic-beta header
-      - model_name: bedrock-claude-sonnet46-1m
+      - model_name: claude-bedrock-sonnet46-1m
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
@@ -43,7 +52,7 @@ data:
           timeout: 900
           extra_headers:
             anthropic-beta: "context-1m-2025-08-07"
-      - model_name: bedrock-claude-haiku45
+      - model_name: claude-bedrock-haiku45
         litellm_params:
           model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
           aws_region_name: us-east-1
@@ -101,10 +110,10 @@ data:
       cooldown_time: 60
       # Automatic fallback: if external provider fails, use Bedrock Claude
       fallbacks:
-        - {"gpt-5.5": ["bedrock-claude-sonnet46"]}
-        - {"gemini-3.1-pro": ["bedrock-claude-sonnet46"]}
-        - {"gemini-3-flash": ["bedrock-claude-sonnet46"]}
-        - {"o4-mini": ["bedrock-claude-sonnet46"]}
+        - {"gpt-5.5": ["claude-bedrock-sonnet46"]}
+        - {"gemini-3.1-pro": ["claude-bedrock-sonnet46"]}
+        - {"gemini-3-flash": ["claude-bedrock-sonnet46"]}
+        - {"o4-mini": ["claude-bedrock-sonnet46"]}
 
     # ============================================================
     # LiteLLM Core Settings
