@@ -94,7 +94,7 @@ spec:
       containers:
         - name: litellm
           # Pin to a specific version — never use :latest or moving tags in production
-          image: ghcr.io/berriai/litellm-database:v1.86.2
+          image: ghcr.io/berriai/litellm-database:v1.84.3
           imagePullPolicy: IfNotPresent
 
           args:
