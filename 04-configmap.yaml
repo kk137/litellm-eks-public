@@ -164,3 +164,8 @@ data:
       database_connection_pool_limit: 10
       database_connection_timeout: 30
       allow_requests_on_db_unavailable: true
+      # Share in-memory spend/budget state across all replicas via Redis
+      redis_host: os.environ/REDIS_HOST
+      redis_port: "6379"
+      redis_password: os.environ/REDIS_PASSWORD
+      redis_ssl: true
