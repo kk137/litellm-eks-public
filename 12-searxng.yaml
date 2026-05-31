@@ -23,12 +23,14 @@ data:
       limiter: false
       image_proxy: false
 
-    # Only keep engines that are stable under high-frequency AI calls
+    # Engine selection for high-frequency AI calls
     engines:
       - name: google
-        disabled: true          # Prone to CAPTCHA
+        disabled: false         # Enabled - broad coverage
       - name: bing
-        disabled: true          # Prone to CAPTCHA
+        disabled: false         # Enabled - broad coverage
+      - name: baidu
+        disabled: false         # Enabled - China / Chinese-language coverage
       - name: startpage
         disabled: true          # Rate-limited
       - name: duckduckgo
