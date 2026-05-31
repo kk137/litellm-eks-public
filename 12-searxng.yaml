@@ -7,12 +7,39 @@ metadata:
 data:
   settings.yml: |
     use_default_settings: true
+
+    general:
+      instance_name: "SearXNG-LiteLLM"
+
     search:
+      safe_search: 1
+      default_lang: "all"
       formats:
         - html
         - json
+
     server:
       secret_key: "litellm-searxng-secret-2026"
+      limiter: false
+      image_proxy: false
+
+    # Only keep engines that are stable under high-frequency AI calls
+    engines:
+      - name: google
+        disabled: true          # Prone to CAPTCHA
+      - name: bing
+        disabled: true          # Prone to CAPTCHA
+      - name: startpage
+        disabled: true          # Rate-limited
+      - name: duckduckgo
+        disabled: false         # Primary engine - stable
+      - name: wikipedia
+        disabled: false         # Good for knowledge queries
+      - name: brave
+        disabled: false         # Friendly to automation
+      - name: qwant
+        disabled: false         # EU search engine, stable
+
 ---
 apiVersion: apps/v1
 kind: Deployment
