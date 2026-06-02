@@ -88,15 +88,26 @@ data:
           model: gemini/gemini-3-flash
           api_key: os.environ/GEMINI_API_KEY
 
-      # ── OpenAI (API Key from Secrets Manager) ──
+      # ── OpenAI GPT on Bedrock Mantle (Responses API) ──
+      # Mantle's gpt-5.5/5.4 only expose /openai/v1/responses, NOT chat/completions.
+      # Use openai/ provider + the /openai/v1 base: LiteLLM appends /responses.
+      # Clients MUST call the proxy's /v1/responses endpoint (responses.create).
       - model_name: gpt-5.5
         litellm_params:
-          model: openai/gpt-5.5
-          api_key: os.environ/OPENAI_API_KEY
-      - model_name: o4-mini
+          model: openai/openai.gpt-5.5
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      - model_name: gpt-5.4
         litellm_params:
-          model: openai/o4-mini
-          api_key: os.environ/OPENAI_API_KEY
+          model: openai/openai.gpt-5.4
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      # GPT-5.4 Oregon fallback (same model_name → router load-balances/fails over)
+      - model_name: gpt-5.4
+        litellm_params:
+          model: openai/openai.gpt-5.4
+          api_base: https://bedrock-mantle.us-west-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
 
     # ============================================================
     # Router Settings — least-busy routing + fallback
@@ -109,11 +120,10 @@ data:
       allowed_fails: 2
       cooldown_time: 60
       # Automatic fallback: if external provider fails, use Bedrock Claude
+      # Note: gpt-5.5/gpt-5.4 use Responses API and cannot fallback to chat-only models
       fallbacks:
-        - {"gpt-5.5": ["claude-sonnet-4-6"]}
         - {"gemini-3.1-pro": ["claude-sonnet-4-6"]}
         - {"gemini-3-flash": ["claude-sonnet-4-6"]}
-        - {"o4-mini": ["claude-sonnet-4-6"]}
 
     # ============================================================
     # LiteLLM Core Settings
