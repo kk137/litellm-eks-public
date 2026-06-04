@@ -79,13 +79,13 @@ data:
           aws_region_name: us-east-1
 
       # ── Google Gemini (API Key from Secrets Manager) ──
-      - model_name: gemini-3.1-pro
+      - model_name: gemini-3.5-flash
         litellm_params:
-          model: gemini/gemini-3.1-pro
+          model: gemini/gemini-3.5-flash
           api_key: os.environ/GEMINI_API_KEY
-      - model_name: gemini-3-flash
+      - model_name: gemini-3.1-flash-image
         litellm_params:
-          model: gemini/gemini-3-flash
+          model: gemini/gemini-3.1-flash-image
           api_key: os.environ/GEMINI_API_KEY
 
       # ── OpenAI GPT on Bedrock Mantle (Responses API) ──
@@ -137,8 +137,8 @@ data:
       # Automatic fallback: if external provider fails, use Bedrock Claude
       # Note: gpt-5.5/gpt-5.4 use Responses API and cannot fallback to chat-only models
       fallbacks:
-        - {"gemini-3.1-pro": ["claude-sonnet-4-6"]}
-        - {"gemini-3-flash": ["claude-sonnet-4-6"]}
+        - {"gemini-3.5-flash": ["claude-sonnet-4-6"]}
+        - {"gemini-3.1-flash-image": ["claude-sonnet-4-6"]}
 
     # ============================================================
     # LiteLLM Core Settings
