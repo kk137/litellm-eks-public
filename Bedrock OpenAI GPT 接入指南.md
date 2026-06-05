@@ -205,6 +205,7 @@ web_search = "disabled"             # mantle 不支持 web_search tool 类型
 name = "LiteLLM Bedrock GPT"
 base_url = "https://<your-litellm-domain>/v1"
 wire_api = "responses"              # 必须指定，走 Responses API
+env_key = "OPENAI_API_KEY"          # 指定从 .env 中读取哪个环境变量作为 API Key
 
 [profiles.bedrock-55]
 model = "openai.gpt-5.5"
@@ -222,6 +223,8 @@ model_provider = "litellm-bedrock"
 ```bash
 OPENAI_API_KEY=<LiteLLM-virtual-key>   # LiteLLM 虚拟 key，不是 Bedrock Key
 ```
+
+> **注意**：`.env` 中的变量名必须与 `config.toml` 里 `env_key` 指定的值一致。如果不配置 `env_key`，部分环境下 Codex 可能无法正确读取 API Key，导致 `401 Unauthorized` 报错。
 
 **Step 3：重启 Codex Desktop**
 
