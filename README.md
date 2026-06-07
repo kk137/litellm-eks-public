@@ -335,6 +335,19 @@ aws iam put-role-policy --role-name litellm-irsa-role \
       "Resource": ["arn:aws:bedrock:*::foundation-model/*"]
     }]
   }'
+
+# S3 请求日志（s3_v2 callback，见 04-configmap.yaml 的 s3_callback_params）
+# 仅当启用 S3 日志时需要；桶需先创建（建议开启加密 + 阻断公开访问）
+aws iam put-role-policy --role-name litellm-irsa-role \
+  --policy-name litellm-s3-logs-write \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": ["arn:aws:s3:::litellm-request-logs-<YOUR_ACCOUNT_ID>-us-east-1/*"]
+    }]
+  }'
 ```
 
 ### 8. 部署 K8s 资源
@@ -419,7 +432,7 @@ litellm-eks/
 ├── 01-serviceaccount.yaml       # ServiceAccount (IRSA)
 ├── 02-secretstore.yaml          # ESO SecretStore
 ├── 03-externalsecret.yaml       # ESO ExternalSecret (12 个密钥)
-├── 04-configmap.yaml            # LiteLLM 配置（模型列表、路由、缓存）
+├── 04-configmap.yaml            # LiteLLM 配置（模型列表、路由、缓存、S3 日志 callback）
 ├── 05-deployment.yaml           # Deployment (3 副本, 反亲和, 探针)
 ├── 06-service.yaml              # ClusterIP Service
 ├── 07-ingress.yaml              # Internal ALB Ingress (CloudFront VPC Origin 接入)
@@ -430,6 +443,9 @@ litellm-eks/
 ├── CLOUDFRONT-MIGRATION-PLAN.md # CloudFront + VPC Origin 改造方案
 ├── CLOUDFRONT-LLM-CONFIG.md     # CloudFront LLM 场景配置要点
 ├── CDN-ACCELERATION-ANALYSIS.md # CDN 加速分析
+├── HOTFIX-PR26627.md            # PR26627 热修复说明
+├── Bedrock OpenAI GPT 接入指南.md       # GPT-5.5/5.4 via Bedrock 接入（直连 + LiteLLM 两条路径）
+├── LiteLLM 监控与日志审计指南.md        # 监控/日志/审计三维度（用量、运行、审计 + S3 日志）
 └── OPERATIONS.md                # 完整运维手册
 ```
 
