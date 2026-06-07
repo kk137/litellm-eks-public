@@ -164,11 +164,16 @@ data:
       callbacks:
         - "prometheus"
         - "websearch_interception"
+        - "s3_v2"
       websearch_interception_params:
         enabled_providers:
           - bedrock
           - bedrock_converse
         search_tool_name: searxng-search
+      # S3 request/response logging (async batch, non-blocking; complete untruncated payload)
+      s3_callback_params:
+        s3_bucket_name: litellm-request-logs-<YOUR_ACCOUNT_ID>-us-east-1
+        s3_region_name: us-east-1
       # Request/response logging (set to false in prod if PII concern)
       set_verbose: false
       json_logs: true
