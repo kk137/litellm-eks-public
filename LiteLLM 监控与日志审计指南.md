@@ -196,6 +196,7 @@ aws logs filter-log-events --region us-east-1 \
 - ✅ 实时指标：Prometheus `/metrics` 端点已暴露
 - ✅ K8s 基础设施审计：EKS 控制面 5 类日志 → CloudWatch（30 天）
 - ✅ 应用日志：`kubectl logs`（实时可看）+ S3（持久化完整版）
+- ✅ Cost 准确性：6 个 Claude 模型 + GPT 的 token/cache 记账**逐行实测吻合**（见 ⑤）；AWS 账单归因标签 `iamPrincipal/Name` 已激活
 
 **当前缺口（按需补，注意成本）：**
 - ⚠️ Prometheus 指标**无人采集**（无 Prometheus server）→ 需要图表时部署 AMP+Grafana（见改进项 #3）
@@ -312,3 +313,138 @@ litellm_settings:
 | 🟡 中 | #2 S3 日志持久化 | 省钱地补回"日志持久化"缺口 | ✅ |
 | 🟢 低 | #3 Prometheus 采集 | 要图表/告警时再上 | ✅ |
 | ⚪ 暂缓 | #5 Redis 事务缓冲 | 量级远未到 | ✅ |
+
+---
+
+## ⑤ Cost 准确性与 AWS 原生账单集成
+
+> 本节所有结论均经 **AWS 官方文档 + 集群实测逐行核对** 双重确认（验证日期 2026-06-07）。
+
+### 5.1 LiteLLM 的花费是怎么算出来的 —— 是"估算账",不是 AWS 真实账单
+
+**关键认知**：`LiteLLM_SpendLogs.spend` 不是从 AWS 拿来的真实计费，而是 LiteLLM **自己用一张"价目表"乘以 token 数算出来的**：
+
+```
+spend = 标准 input token × input 单价
+      + output token × output 单价
+      + cache 写 token × cache 写单价   （仅 Anthropic 有此项）
+      + cache 读 token × cache 读单价
+```
+
+- **单价来源**：① 内置 model cost map（`model_prices_and_context_window.json`，随版本更新）；② config 里手写的 `model_info`（**优先级更高，覆盖内置表**）。
+- **token 数来源**：上游 provider（Bedrock）返回的 `usage` 字段。
+- 算出的成本写进 `spend` 列，也通过响应头 `x-litellm-response-cost` 返回。
+
+> ⚠️ **因此 LiteLLM 的金额与 AWS 真实账单天然会有 gap**：单价表是否最新、token 口径是否一致，都会造成偏差。LiteLLM 适合做**相对趋势**（谁用得多、哪个 key 烧钱），绝对金额需与 AWS 账单对账后才可信。
+
+### 5.2 实测验证：本集群的成本计算到底准不准
+
+用如下方法逐行核对（**对账的标准做法**）：拉一条真实 SpendLog，取出 `metadata` 里的 cache token 明细，按官方单价手算，与 `spend` 列比对。
+
+```bash
+# 进 pod 用 prisma 跑（pod 内无 psycopg2/asyncpg，但 prisma 可用）
+POD=$(kubectl get pods -n litellm -l app=litellm -o jsonpath='{.items[0].metadata.name}')
+# 示例：取一条 opus 记录，读取 prompt_tokens / completion_tokens / metadata 里的
+#   cache_creation_input_tokens / cache_read_input_tokens，再按单价手算
+```
+
+**核对公式**（Anthropic，cache 写 = 1.25× input，cache 读 = 0.1× input）：
+```
+标准 input = prompt_tokens − cache_creation_input_tokens − cache_read_input_tokens
+calc = 标准input×input价 + completion×output价
+     + cache_creation×(1.25×input价) + cache_read×(0.1×input价)
+```
+
+**实测结论（6 个 Claude 模型，每个抽查多行，精确到 6 位小数）：**
+
+| 模型 | input $/M | cache写 $/M | cache读 $/M | 逐行核对 |
+|------|-----------|-------------|-------------|---------|
+| claude-opus-4-8 | 5.5 | 6.875 | 0.55 | ✅ 全部吻合 |
+| claude-opus-4-7 | 5.5 | 6.875 | 0.55 | ⚠️ 见下方注 |
+| claude-opus-4-6 | 5.5 | 6.875 | 0.55 | ✅ 全部吻合 |
+| claude-opus-4-5 | 5.5 | 6.875 | 0.55 | ✅ 全部吻合 |
+| claude-sonnet-4-6 | 3.3 | 4.125 | 0.33 | ✅ 全部吻合 |
+| claude-haiku-4-5 | 1.1 | 1.375 | 0.11 | ✅ 全部吻合 |
+
+> **✅ 核心结论：LiteLLM 内置 cost map 当前完全正确地计入了 cache token**（cache 写按 1.25× input、cache 读按 0.1× input），与 AWS 定价规则一致。**之前一度怀疑的"cache 漏算"经逐行核对证伪 —— 不存在。**
+
+> ⚠️ **opus-4-7 的历史偏差（已自愈，记录备查）**：逐行核对发现 opus-4-7 在 **2026-05-16 ~ 05-22** 这几天，内置 map 的 input 单价偏低（约 5.0/M，应为 5.5/M，偏低约 9%），**05-23 起内置 map 已修正为 5.5/M**。这是**新模型上线初期内置价目表尚未校准**的典型现象——每条历史记录在写入当下都用了当时 map 的价、本身没算错，只是早期那几天价偏低。影响范围小（约 80 条请求、绝对金额差几美元）且已自愈。这正是"依赖内置 map"的固有弱点，若要彻底防漂移可选 5.4 的手写 `model_info`。
+
+### 5.3 GPT-5.5/5.4 的 cache 定价 —— 与 Claude 机制不同（官方确认）
+
+GPT-5.5/5.4 走 **Bedrock Mantle 的 `/openai/v1/responses`**，沿用 **OpenAI 的计费模型**，与 Anthropic 在 Bedrock 上的机制**根本不同**：
+
+| | **Anthropic Claude**（Bedrock Converse） | **OpenAI GPT**（Bedrock Mantle / Responses） |
+|---|------------------------------------------|---------------------------------------------|
+| cache 触发 | **手动**放 `cachePoint` checkpoint | **自动**（prompt ≥1024 token，无需改代码） |
+| **cache write 计费** | ✅ **有**，1.25× input | ❌ **无 / 免费** |
+| cache read 计费 | ✅ 0.1× input | ✅ ~0.1× input（GPT-5 系列 90% 折扣） |
+| SpendLog 字段 | `cache_creation_input_tokens` + `cache_read_input_tokens` | 仅 `cached_tokens`（只有命中，无 write） |
+
+**官方依据**：
+- **OpenAI 官方 Prompt Caching 文档**原文：*"Will I be expected to pay extra for writing to Prompt Caching? **No.** Caching happens automatically, with no explicit action needed or extra cost paid"*；*"has no additional fees associated with it"*。
+- **AWS Bedrock prompt-caching 文档**（Anthropic 侧）：*"cache writes may cost more than standard input tokens"* —— 仅适用于 Claude。
+- **OpenAI 定价页**：GPT-5 系列 cached input = input 的 **10%**。
+
+**实测验证（本集群 gpt-5.5）：**
+- SpendLog 里 GPT 请求**只有 `cached_tokens`，从不出现 `cache_creation`** → 印证 Mantle 不收 cache write 费。
+- 抽查 `cached_tokens=7755` 的请求：实际 spend 比"不打折扣"低正好 `7755×(input − cache_hit) = 7755×(5.5e-6 − 0.55e-6) ≈ $0.038`，**证明 cache 读折扣已正确生效**。
+
+> ✅ **当前 config 的 GPT `model_info` 已完整且准确**：写了 `input_cost_per_token` + `output_cost_per_token` + `input_cost_per_token_cache_hit`（= input 的 0.1×，即 cache 读折扣）。**GPT 不需要 `cache_creation_input_token_cost`（OpenAI 模型无 cache write 计费）。**
+
+> 📌 **GPT 为什么必须手写 `model_info`**：`openai/openai.gpt-5.5` 在 LiteLLM 内置 map 里**完全不存在**（`get_model_info` 抛 `This model isn't mapped yet`）。不手写就算不出钱（spend=0）。Claude 则相反——内置 map 已有准确价，无需手写。
+
+### 5.4 是否要把定价写进 config —— 决策与现状
+
+| 方案 | 做法 | 维护负担 | 风险 | 本集群采用 |
+|------|------|----------|------|-----------|
+| 内置 map（Claude 现状） | 不写单价，靠内置 cost map | 零 | 新模型上线初期可能短暂偏差（见 opus-4-7） | ✅ Claude |
+| 手写 `model_info`（GPT 现状） | config 显式写 input/output/cache_hit | 价格变动需手动追 | 写错会长期算错 | ✅ GPT（**必须**，内置 map 无此模型） |
+
+**当前结论：config 无需改动。** Claude 内置 map 实测准确、GPT 手写 `model_info` 实测准确且完整，两者的 cache 定价都已正确生效。
+
+### 5.5 与 AWS 原生账单集成 —— 三条路线
+
+LiteLLM 是官方文档定义的 **"Scenario 4 网关"**：用**一个 IAM role**（`litellm-irsa-role`）调 Bedrock，导致账单里这一个集群的所有 Bedrock 花费都归到这一个身份。
+
+| 路线 | 做什么 | 在哪看 | 适合 |
+|------|--------|--------|------|
+| **A. 单 role / principal 归因**（轻，已启用见 5.6） | 用 Bedrock 的 IAM principal 成本归因 | Cost Explorer / CUR 2.0 按 `iamPrincipal/Name` 分组 | 按身份对账 litellm-role 真实花费 |
+| **B. Application Inference Profile + 标签** | 给模型建带 cost allocation tag 的 AIP，model 字符串改用 AIP ARN | Cost Explorer 按 tag（如 project）分组 | 按模型/项目拆真实账单 |
+| **C. 每用户 AssumeRole + session tag** | 网关为每个用户 `AssumeRole`，session name=用户身份 | CUR 2.0 `iamPrincipal/` 前缀标签 | 按用户拆（重，需改网关代码 + STS 限流，本量级不值得） |
+
+> **AWS 服务名陷阱（对账必看）**：Claude/Mantle 推理实际计费在 **`Amazon Bedrock Service`**（注意带 "Service"），而 `Amazon Bedrock`（不带 Service）只含 Nova/DataAutomation 等。对账时 SERVICE 维度务必选 `Amazon Bedrock Service`，否则会严重少算。
+
+### 5.6 已落地：激活 iamPrincipal 成本归因标签（2026-06-07）
+
+AWS 2026-04 推出 **Bedrock 粒度成本归因**：自动把推理成本归到调用的 IAM principal。本账户的 `iamPrincipal/*` 归因数据已在收集，但默认未激活成 cost allocation tag。**本轮已激活 `iamPrincipal/Name`**（Billing 层开关，可逆、零成本、不碰集群）：
+
+```bash
+# 激活（已执行）
+aws ce update-cost-allocation-tags-status --region us-east-1 \
+  --cost-allocation-tags-status TagKey=iamPrincipal/Name,Status=Active
+
+# 激活后 24–48h，按 principal 拆 litellm-role 的真实 Bedrock 花费：
+aws ce get-cost-and-usage --region us-east-1 \
+  --time-period Start=2026-06-01,End=2026-06-30 --granularity MONTHLY \
+  --metrics "UnblendedCost" \
+  --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Bedrock Service"]}}' \
+  --group-by Type=TAG,Key=iamPrincipal/Name
+```
+
+### 5.7 账户混用的局限（为什么不能简单"账单 ÷ LiteLLM"）
+
+实测发现本账户的 Bedrock 用量**由多个身份共享**，`litellm-irsa-role` 只是其一。用 CloudTrail 核对调用方（按 EventSource=`bedrock.amazonaws.com`）：
+
+```bash
+aws cloudtrail lookup-events --region us-east-1 \
+  --lookup-attributes AttributeKey=EventSource,AttributeValue=bedrock.amazonaws.com \
+  --start-time <start> --end-time <end>
+# 实测：调 Bedrock 的身份有 litellm-irsa-role、另一应用的 InstanceRole、
+#       IAM user、Admin 等多个 —— 账单是这些身份的总和。
+```
+
+> ⚠️ **结论**：
+> 1. **账户级 Bedrock 账单 ≠ LiteLLM 花费**，里面混了其它应用/手动调用。
+> 2. 在 `iamPrincipal/Name` 标签生效前（24–48h），**无法从账单干净切出 litellm-role 的真实美元**——这是"单 role 网关"的固有局限，5.6 的标签正是为解决它而激活。
+> 3. **LiteLLM 内部记账（SpendLogs）本身是准的**（5.2/5.3 已逐行证明）；对账的难点在 AWS 侧的"按身份拆分"，而非 LiteLLM 算错。
