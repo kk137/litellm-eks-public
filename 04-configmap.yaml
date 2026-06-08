@@ -16,24 +16,28 @@ data:
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
+        # Opus 4.8 后端默认 1M context（无需 beta header），显式声明覆盖 LiteLLM 默认 200K
+        model_info:
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
       - model_name: claude-opus-4-7
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-7
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
+        model_info:
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
       - model_name: claude-opus-4-6
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-6-v1
           aws_region_name: us-east-1
           stream_timeout: 900
           timeout: 900
-      - model_name: claude-opus-4-5
-        litellm_params:
-          model: bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0
-          aws_region_name: us-east-1
-          stream_timeout: 900
-          timeout: 900
+        model_info:
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
       - model_name: claude-sonnet-4-6
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
