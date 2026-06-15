@@ -10,12 +10,47 @@ data:
     # ============================================================
     model_list:
       # ── AWS Bedrock Claude (IRSA, no API key needed) ──
+      # Fable 5 uses a GLOBAL cross-region inference profile (global. prefix).
+      # Bedrock backing regions: us-east-1 + eu-north-1. Pricing is Global CRIS:
+      # $10/1M in, $50/1M out, $1/1M cache read, $12.50/1M 5m cache write.
+      # NOTE: requires data-sharing opt-in — data leaves the AWS boundary,
+      # 30-day retention + human review (unlike other Bedrock models here).
+      - model_name: claude-fable-5
+        litellm_params:
+          model: bedrock/global.anthropic.claude-fable-5
+          aws_region_name: us-east-1
+          custom_llm_provider: bedrock
+          stream_timeout: 900
+          input_cost_per_token: 0.00001
+          output_cost_per_token: 0.00005
+          cache_creation_input_token_cost: 0.0000125
+          cache_read_input_token_cost: 0.000001
+          cache_creation_input_token_cost_above_1hr: 0.00002
+        model_info:
+          supports_prompt_caching: true
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
+      # 1M context variant — [1m] suffix triggers client to add beta header
+      - model_name: claude-fable-5[1m]
+        litellm_params:
+          model: bedrock/global.anthropic.claude-fable-5
+          aws_region_name: us-east-1
+          custom_llm_provider: bedrock
+          stream_timeout: 900
+          input_cost_per_token: 0.00001
+          output_cost_per_token: 0.00005
+          cache_creation_input_token_cost: 0.0000125
+          cache_read_input_token_cost: 0.000001
+          cache_creation_input_token_cost_above_1hr: 0.00002
+        model_info:
+          supports_prompt_caching: true
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
       - model_name: claude-opus-4-8
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-8
           aws_region_name: us-east-1
           stream_timeout: 900
-          timeout: 900
         # Opus 4.8 后端默认 1M context（无需 beta header），显式声明覆盖 LiteLLM 默认 200K
         model_info:
           max_input_tokens: 1000000
@@ -25,7 +60,6 @@ data:
           model: bedrock/us.anthropic.claude-opus-4-7
           aws_region_name: us-east-1
           stream_timeout: 900
-          timeout: 900
         model_info:
           max_input_tokens: 1000000
           max_output_tokens: 128000
@@ -34,7 +68,6 @@ data:
           model: bedrock/us.anthropic.claude-opus-4-6-v1
           aws_region_name: us-east-1
           stream_timeout: 900
-          timeout: 900
         model_info:
           max_input_tokens: 1000000
           max_output_tokens: 128000
@@ -43,14 +76,12 @@ data:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
           stream_timeout: 900
-          timeout: 900
       # 1M context variant — enabled via anthropic-beta header
       - model_name: claude-sonnet-4-6[1m]
         litellm_params:
           model: bedrock/us.anthropic.claude-sonnet-4-6
           aws_region_name: us-east-1
           stream_timeout: 900
-          timeout: 900
           extra_headers:
             anthropic-beta: "context-1m-2025-08-07"
         model_info:
@@ -138,7 +169,7 @@ data:
       routing_strategy: least-busy    # Options: simple-shuffle | least-busy | latency-based-routing
       num_retries: 3
       retry_after: 5
-      timeout: 600
+      timeout: 1200
       allowed_fails: 2
       cooldown_time: 60
       # Automatic fallback: if external provider fails, use Bedrock Claude
@@ -146,6 +177,8 @@ data:
       fallbacks:
         - {"gemini-3.5-flash": ["claude-sonnet-4-6"]}
         - {"gemini-3.1-flash-image": ["claude-sonnet-4-6"]}
+        # opus-4-8 超时/失败时降级到 sonnet-4-6[1m]（1M 上下文，可接住大 context 请求）
+        - {"claude-opus-4-8": ["claude-sonnet-4-6[1m]"]}
 
     # ============================================================
     # LiteLLM Core Settings
@@ -176,7 +209,7 @@ data:
         search_tool_name: searxng-search
       # S3 request/response logging (async batch, non-blocking; complete untruncated payload)
       s3_callback_params:
-        s3_bucket_name: litellm-request-logs-<YOUR_ACCOUNT_ID>-us-east-1
+        s3_bucket_name: litellm-request-logs-345594601181-us-east-1
         s3_region_name: us-east-1
       # Request/response logging (set to false in prod if PII concern)
       set_verbose: false
