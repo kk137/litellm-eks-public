@@ -1,3 +1,8 @@
+# ⚠️⚠️⚠️ CONTAINS PLACEHOLDERS (<YOUR_ACCOUNT_ID>, <YOUR_DOMAIN> in SSO/PROXY_BASE_URL env).
+# DO NOT `kubectl apply` this whole file to a live cluster — it overwrites real SSO config
+# and breaks the UI (placeholder PROXY_BASE_URL => invalid login URL => client-side exception).
+# To change ONE field on a live deploy use `kubectl patch` / `kubectl set env`, NOT apply.
+# Real values: account 345594601181, domain litellm.hajunyao.people.aws.dev.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
