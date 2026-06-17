@@ -8,3 +8,6 @@
 litellm-docker/.env
 CLAUDE.md
 *.docx
+# Local manifests with real ARNs/account id/domain (not sanitized — keep local only)
+13-firecrawl.yaml
+14-ingress-direct.yaml
