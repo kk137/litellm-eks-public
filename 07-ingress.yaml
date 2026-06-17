@@ -1,3 +1,6 @@
+# ⚠️⚠️⚠️ CONTAINS PLACEHOLDERS (<REGION>, <YOUR_ACCOUNT_ID>, <YOUR_CERT_ID>, <YOUR_WAF_ID>,
+# <YOUR_ALLOWED_CIDRS>, <YOUR_DOMAIN>) — DO NOT `kubectl apply` directly; replace all first.
+# Check: grep -nE "<YOUR|<REGION>" 07-ingress.yaml
 # Requires: AWS Load Balancer Controller installed in the cluster
 # Requires: ACM certificate ARN and WAF WebACL ARN (replace placeholders)
 apiVersion: networking.k8s.io/v1

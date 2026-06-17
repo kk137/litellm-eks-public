@@ -1,2 +1,10 @@
 .DS_Store
 .playwright-mcp/
+
+# Secrets / real values — never commit to this public repo
+.env
+*.env
+**/.env
+litellm-docker/.env
+CLAUDE.md
+*.docx
