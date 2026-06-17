@@ -162,6 +162,21 @@ data:
           input_cost_per_token_cache_hit: 0.000000275
           output_cost_per_token: 0.0000165
 
+      # ── xAI Grok on Bedrock Mantle ──
+      # Grok 4.3 is us-west-2 (Oregon) ONLY — no geo/global CRIS. Mantle endpoint.
+      # Supports BOTH Chat Completions and Responses API (unlike gpt-5.4 which is
+      # Responses-only), so clients can call /v1/chat/completions or /v1/responses.
+      - model_name: grok-4.3
+        litellm_params:
+          model: openai/xai.grok-4.3
+          api_base: https://bedrock-mantle.us-west-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+        model_info:
+          max_input_tokens: 1000000
+          input_cost_per_token: 0.00000125
+          output_cost_per_token: 0.0000025
+
     # ============================================================
     # Router Settings — least-busy routing + fallback
     # ============================================================

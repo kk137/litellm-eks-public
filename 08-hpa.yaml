@@ -22,13 +22,15 @@ spec:
           type: Utilization
           averageUtilization: 65
 
-    # Scale up when average memory > 75%
+    # Scale up when average memory > 80%
+    # (Raised from 75%: at 3 replicas steady-state memory is ~76%, which would
+    #  otherwise keep HPA pinned at 4. 80% lets it hold the intended 3 replicas.)
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
-          averageUtilization: 75
+          averageUtilization: 80
 
   behavior:
     scaleUp:
