@@ -15,8 +15,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1                # One extra pod during rolling update
-      maxUnavailable: 0          # Zero downtime: never kill before new is ready
+      maxSurge: 0                # No extra pod: never exceed replica count (avoids pulling a new node)
+      maxUnavailable: 1          # Stop one old pod first, start new pod on the freed node (in-place roll)
   template:
     metadata:
       labels:
