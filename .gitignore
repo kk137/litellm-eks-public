@@ -11,3 +11,7 @@ CLAUDE.md
 # Local manifests with real ARNs/account id/domain (not sanitized — keep local only)
 13-firecrawl.yaml
 14-ingress-direct.yaml
+# Real render values (account id, domain, cert/waf arns) — local only
+values.local.env
+# but DO commit the placeholder example
+!values.example.env
