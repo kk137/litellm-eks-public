@@ -15,3 +15,15 @@ CLAUDE.md
 values.local.env
 # but DO commit the placeholder example
 !values.example.env
+
+# AgentCore runbook 真实值清单(本地)
+docs/agentcore-runbook.values.local
+
+# AgentCore runbook 完整真实值版(含账号/域名/gateway id) — 本地参考,绝不入库
+docs/agentcore-websearch-runbook.REAL.*
+
+# runbook 只入库 md;docx/html 本地生成,不入库
+docs/agentcore-websearch-runbook.html
+
+# 含真实域名,本地 POC 脚本,不入库
+docs/ttft-poc-test.py

@@ -179,6 +179,36 @@ data:
           input_cost_per_token: 0.00000125
           output_cost_per_token: 0.0000025
 
+      # --- Codex internal-task aliases ---
+      # Codex 的 guardian_approval(执行前自动审批)用 OpenAI 原生 slug
+      # 调内部任务(codex-auto-review / gpt-5.4-mini / gpt-5 / gpt-5-codex)。
+      # 网关没有这些 model 会 400,进而阻断 Codex 的工具调用(含 web search)。
+      # 这里把它们映射到真实模型;不关 guardian,保留审批能力。
+      - model_name: codex-auto-review
+        litellm_params:
+          model: openai/openai.gpt-5.5
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+      - model_name: gpt-5.4-mini
+        litellm_params:
+          model: openai/openai.gpt-5.4
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+      - model_name: gpt-5
+        litellm_params:
+          model: openai/openai.gpt-5.5
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+      - model_name: gpt-5-codex
+        litellm_params:
+          model: openai/openai.gpt-5.5
+          api_base: https://bedrock-mantle.us-east-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+
     # ============================================================
     # Router Settings — least-busy routing + fallback
     # ============================================================
