@@ -1,7 +1,30 @@
 # LiteLLM on Amazon EKS — 生产级部署文档
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![EKS](https://img.shields.io/badge/EKS-1.35-blue.svg)](https://aws.amazon.com/eks/)
+[![LiteLLM](https://img.shields.io/badge/LiteLLM-proxy-green.svg)](https://github.com/BerriAI/litellm)
+
 > 多 LLM 网关：统一代理 AWS Bedrock (Claude)、Google Gemini、OpenAI、Azure OpenAI，  
 > 支持 API Key 管理、缓存、限流、可观测性。
+
+从零到生产的完整部署手册：一套已脱敏的 K8s manifest + 部署脚本 + 运维文档，覆盖
+EKS → Karpenter → Redis/Aurora → Secrets → Helm → IRSA → CloudFront 全链路。
+所有真实值（账号 ID、域名、ARN）都不入库，通过占位符 + `render-and-apply.sh` 在应用时注入。
+
+## 文档导航
+
+| 文档 | 内容 |
+|------|------|
+| [本 README](#部署步骤) | 主干部署流程（10 步）、组件清单、WAF/模型/SSO/运维/清理 |
+| [docs/operations.md](docs/operations.md) | 完整运维手册：升级、回滚、Secrets 轮换、已知问题、紧急场景 |
+| [docs/monitoring-logging-audit-guide.md](docs/monitoring-logging-audit-guide.md) | 监控/日志/审计三维度 + S3 请求日志 |
+| [docs/bedrock-openai-gpt-guide.md](docs/bedrock-openai-gpt-guide.md) | GPT-5.5/5.4 经 Bedrock 接入（直连 + LiteLLM 两条路径） |
+| [docs/agentcore-websearch-runbook.md](docs/agentcore-websearch-runbook.md) | AgentCore 托管 Web Search 接入 runbook |
+| [docs/cloudfront-migration-plan.md](docs/cloudfront-migration-plan.md) | CloudFront + VPC Origin 改造方案 |
+| [docs/cloudfront-llm-config.md](docs/cloudfront-llm-config.md) | CloudFront LLM 代理场景配置要点 |
+| [docs/cdn-acceleration-analysis.md](docs/cdn-acceleration-analysis.md) | CloudFront / Global Accelerator 加速分析 |
+| [docs/gateway-alternatives-evaluation.md](docs/gateway-alternatives-evaluation.md) | 网关选型评估（LiteLLM vs Bifrost vs new-api） |
+| [docs/hotfix-pr26627.md](docs/hotfix-pr26627.md) | Hotfix PR #26627 — Bedrock AIP ARN Prompt Cache 修复 |
 
 ## 架构概览
 
@@ -377,7 +400,7 @@ kubectl rollout status deployment/litellm -n litellm --timeout=300s
 
 ### 9. 配置 CloudFront + Route53
 
-详见 [CLOUDFRONT-MIGRATION-PLAN.md](./CLOUDFRONT-MIGRATION-PLAN.md) 和 [CLOUDFRONT-LLM-CONFIG.md](./CLOUDFRONT-LLM-CONFIG.md)。
+详见 [docs/cloudfront-migration-plan.md](docs/cloudfront-migration-plan.md) 和 [docs/cloudfront-llm-config.md](docs/cloudfront-llm-config.md)。
 
 ```bash
 # CloudFront Distribution 创建后，DNS 指向 CloudFront（非直连 ALB）
@@ -440,13 +463,21 @@ litellm-eks/
 ├── 09-pdb.yaml                  # PDB (最少 2 可用)
 ├── 10-networkpolicy.yaml        # NetworkPolicy (零信任)
 ├── 11-karpenter-nodepool.yaml   # Karpenter v1.3.0 NodePool + EC2NodeClass
-├── CLOUDFRONT-MIGRATION-PLAN.md # CloudFront + VPC Origin 改造方案
-├── CLOUDFRONT-LLM-CONFIG.md     # CloudFront LLM 场景配置要点
-├── CDN-ACCELERATION-ANALYSIS.md # CDN 加速分析
-├── HOTFIX-PR26627.md            # PR26627 热修复说明
-├── Bedrock OpenAI GPT 接入指南.md       # GPT-5.5/5.4 via Bedrock 接入（直连 + LiteLLM 两条路径）
-├── LiteLLM 监控与日志审计指南.md        # 监控/日志/审计三维度（用量、运行、审计 + S3 日志）
-└── OPERATIONS.md                # 完整运维手册
+├── 12-searxng.yaml              # SearXNG (web_search interception 后端)
+├── values.example.env          # render-and-apply 占位符示例
+├── render-and-apply.sh          # 应用时注入真实值（账号/域名/ARN 不入库）
+├── check-placeholders.sh        # 防止把占位符误 apply 到生产
+├── architecture.drawio / .png   # 架构图
+└── docs/                        # 专题文档
+    ├── operations.md                     # 完整运维手册
+    ├── monitoring-logging-audit-guide.md # 监控/日志/审计 + S3 日志
+    ├── bedrock-openai-gpt-guide.md       # GPT-5.5/5.4 via Bedrock 接入
+    ├── agentcore-websearch-runbook.md    # AgentCore 托管 Web Search runbook
+    ├── cloudfront-migration-plan.md      # CloudFront + VPC Origin 改造方案
+    ├── cloudfront-llm-config.md          # CloudFront LLM 场景配置要点
+    ├── cdn-acceleration-analysis.md      # CDN 加速分析
+    ├── gateway-alternatives-evaluation.md # 网关选型评估
+    └── hotfix-pr26627.md                 # PR26627 热修复说明
 ```
 
 ---
@@ -605,7 +636,7 @@ aws cognito-idp admin-add-user-to-group --user-pool-id $USER_POOL_ID \
 
 ## 运维命令
 
-> 📖 **完整运维手册见 [OPERATIONS.md](./OPERATIONS.md)** — 包含升级流程、回滚、Secrets 轮换、已知问题、紧急场景等
+> 📖 **完整运维手册见 [docs/operations.md](docs/operations.md)** — 包含升级流程、回滚、Secrets 轮换、已知问题、紧急场景等
 
 ```bash
 # 查看 Pod 状态
@@ -681,3 +712,15 @@ eksctl delete cluster --name $CLUSTER_NAME --region $REGION
 # 删除 Route53 记录（手动在控制台或 CLI）
 # 删除安全组（VPC 删除后自动清理）
 ```
+
+---
+
+## License
+
+MIT — See [LICENSE](LICENSE).
+
+## Acknowledgments
+
+- [LiteLLM](https://github.com/BerriAI/litellm) by BerriAI — the proxy at the core of this stack
+- [External Secrets Operator](https://external-secrets.io/) · [Karpenter](https://karpenter.sh/) · [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
+- AWS Bedrock Anthropic Claude / Amazon Nova series
