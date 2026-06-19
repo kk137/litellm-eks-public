@@ -11,6 +11,8 @@ CLAUDE.md
 # Local manifests with real ARNs/account id/domain (not sanitized — keep local only)
 13-firecrawl.yaml
 14-ingress-direct.yaml
+# Docker (Tokyo EC2) deployment kit — kept local; contains real .env / config, not for this public repo
+litellm-docker/
 # Real render values (account id, domain, cert/waf arns) — local only
 values.local.env
 # but DO commit the placeholder example
