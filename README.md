@@ -24,6 +24,7 @@ EKS → Karpenter → Redis/Aurora → Secrets → Helm → IRSA → CloudFront 
 | [docs/cloudfront-llm-config.md](docs/cloudfront-llm-config.md) | CloudFront LLM 代理场景配置要点 |
 | [docs/cdn-acceleration-analysis.md](docs/cdn-acceleration-analysis.md) | CloudFront / Global Accelerator 加速分析 |
 | [docs/gateway-alternatives-evaluation.md](docs/gateway-alternatives-evaluation.md) | 网关选型评估（LiteLLM vs Bifrost vs new-api） |
+| [docs/tokyo-docker-enterprise-hardening.md](docs/tokyo-docker-enterprise-hardening.md) | 东京 Docker 环境企业级改造方案（DB→RDS / EC2→ASG，对标官方 CFN） |
 | [docs/hotfix-pr26627.md](docs/hotfix-pr26627.md) | Hotfix PR #26627 — Bedrock AIP ARN Prompt Cache 修复 |
 
 ## 架构概览
