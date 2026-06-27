@@ -29,3 +29,6 @@ docs/agentcore-websearch-runbook.html
 
 # 含真实域名,本地 POC 脚本,不入库
 docs/ttft-poc-test.py
+
+# Reference: AWS-blog CFN+ECS LiteLLM repo (zhangzhenhuajack/aws-builder), downloaded for analysis
+litellm-ecs-cfn-reference/
