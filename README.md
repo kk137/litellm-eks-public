@@ -20,6 +20,7 @@ EKS → Karpenter → Redis/Aurora → Secrets → Helm → IRSA → CloudFront 
 | [docs/monitoring-logging-audit-guide.md](docs/monitoring-logging-audit-guide.md) | 监控/日志/审计三维度 + S3 请求日志 |
 | [docs/bedrock-openai-gpt-guide.md](docs/bedrock-openai-gpt-guide.md) | GPT-5.5/5.4 经 Bedrock 接入（直连 + LiteLLM 两条路径） |
 | [docs/agentcore-websearch-runbook.md](docs/agentcore-websearch-runbook.md) | AgentCore 托管 Web Search 接入 runbook |
+| [docs/search-backend-benchmark.md](docs/search-backend-benchmark.md) | 搜索后端对比实测（AgentCore vs exa vs tavily vs SearXNG，延迟+盲评效果） |
 | [docs/cloudfront-migration-plan.md](docs/cloudfront-migration-plan.md) | CloudFront + VPC Origin 改造方案 |
 | [docs/cloudfront-llm-config.md](docs/cloudfront-llm-config.md) | CloudFront LLM 代理场景配置要点 |
 | [docs/cdn-acceleration-analysis.md](docs/cdn-acceleration-analysis.md) | CloudFront / Global Accelerator 加速分析 |
