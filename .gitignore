@@ -21,8 +21,8 @@ values.local.env
 # AgentCore runbook 真实值清单(本地)
 docs/agentcore-runbook.values.local
 
-# AgentCore runbook 完整真实值版(含账号/域名/gateway id) — 本地参考,绝不入库
-docs/agentcore-websearch-runbook.REAL.*
+# 所有 runbook 完整真实值版(含账号/域名/gateway id) — 本地参考,绝不入库
+docs/*.REAL.*
 
 # runbook 只入库 md;docx/html 本地生成,不入库
 docs/agentcore-websearch-runbook.html

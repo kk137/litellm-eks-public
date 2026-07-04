@@ -18,6 +18,7 @@ EKS → Karpenter → Redis/Aurora → Secrets → Helm → IRSA → CloudFront 
 | [本 README](#部署步骤) | 主干部署流程（10 步）、组件清单、WAF/模型/SSO/运维/清理 |
 | [docs/operations.md](docs/operations.md) | 完整运维手册：升级、回滚、Secrets 轮换、已知问题、紧急场景 |
 | [docs/monitoring-logging-audit-guide.md](docs/monitoring-logging-audit-guide.md) | 监控/日志/审计三维度 + S3 请求日志 |
+| [docs/bedrock-per-team-attribution-us-east-1-runbook.md](docs/bedrock-per-team-attribution-us-east-1-runbook.md) | per-team Bedrock 成本归因 runbook（STS session tag → CUR `iamPrincipal/team`，独立 exec 角色） |
 | [docs/bedrock-openai-gpt-guide.md](docs/bedrock-openai-gpt-guide.md) | GPT-5.5/5.4 经 Bedrock 接入（直连 + LiteLLM 两条路径） |
 | [docs/agentcore-websearch-runbook.md](docs/agentcore-websearch-runbook.md) | AgentCore 托管 Web Search 接入 runbook |
 | [docs/search-backend-benchmark.md](docs/search-backend-benchmark.md) | 搜索后端对比实测（AgentCore vs exa vs tavily vs SearXNG，延迟+盲评效果） |
