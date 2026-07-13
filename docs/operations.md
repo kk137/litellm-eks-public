@@ -444,6 +444,28 @@ aws eks update-addon --cluster-name litellm-cluster --addon-name vpc-cni --regio
   - 中期：评估 LiteLLM Enterprise License 或自建 auth 代理
 - **状态**：当前使用未超限
 
+### 4.5 WAF `SizeRestrictions_BODY` 拦截大请求体（403 Forbidden）
+
+- **场景**：客户端（尤其 Claude Code，请求带完整 system prompt + 工具定义）经 ALB 前的 WAF 时，**请求体 > 8KB（8192 字节）** 被 WAF `AWS-AWSManagedRulesCommonRuleSet` 的 `SizeRestrictions_BODY` 规则拦截
+- **症状**：
+  - 客户端报 `API Error: 403 Forbidden`；Claude Code 会误显示 `Please run /login`（客户端把 403 当成认证失败）
+  - **403 由 ALB 直接返回**（响应 `server: awselb/2.0`，HTML 格式，不是 LiteLLM 的 JSON），请求**没到达 pod**
+  - 间歇性：一次会话里小请求（初始化）通过、大请求（带完整上下文）被拦
+- **根因**：`SizeRestrictions_BODY` 是 AWS 托管规则，默认拦 body > 8KB。LLM 网关请求体本就大，8KB 限制不适用
+- **诊断关键**：
+  - WAF **sampled requests 查不到**（托管规则的 block 不进普通采样，采样 0 ≠ 没拦）
+  - 必须**开 ALB access log**，看 `actions_executed` 字段：被拦请求 = `waf`（不 forward），放行 = `waf,forward`；`received_bytes` 字段可确认 body 超 8KB
+  - curl 复现：发 > 8KB body → 403，< 8KB → 200（与 UA/header 无关）
+- **Workaround**：把 WAF WebACL 里 `CommonRuleSet` 的 `SizeRestrictions_BODY` 的 `RuleActionOverride` 从 `Block` 改为 `Count`（不拦只记）
+  ```bash
+  # get-web-acl 拿完整 JSON → 改 RuleActionOverrides 里 SizeRestrictions_BODY 的
+  # ActionToUse 为 {"Count":{}} → update-web-acl 带 LockToken 写回
+  aws wafv2 get-web-acl --scope REGIONAL --region <REGION> --name <WAF_NAME> --id <WAF_ID>
+  # 编辑后
+  aws wafv2 update-web-acl --region <REGION> --cli-input-json file://updated.json
+  ```
+- **状态**：2026-07-12 美东（us-east-1）遇到并修复（改 Count）；根因不是 ALB desync / AntiDDoS / UA / 客户端版本（均已排除）
+
 ---
 
 ## 5. Monitoring & Alerting
