@@ -373,27 +373,39 @@ data:
                 if not isinstance(input_items, list):
                     return data
                 # Collect additional_tools items without mutating during iteration.
+                # NOTE: `found` (did we see an additional_tools item?) is tracked
+                # SEPARATELY from `extra_tools` (did that item carry any tools?).
+                # A later Codex turn re-sends the additional_tools item with an
+                # EMPTY tools list (tools already established earlier in the thread).
+                # That empty item is still a non-standard variant Mantle rejects, so
+                # it MUST be dropped from input even when there is nothing to merge —
+                # keying the rewrite off `extra_tools` alone left the empty item in
+                # place and produced 400 "Invalid 'input'" on every follow-up turn.
+                found = False
                 extra_tools = []
                 kept_items = []
                 for item in input_items:
                     if isinstance(item, dict) and item.get("type") == "additional_tools":
+                        found = True
                         tools = item.get("tools")
                         if isinstance(tools, list):
                             extra_tools.extend(tools)
                         # drop the item (do not keep it in input)
                     else:
                         kept_items.append(item)
-                if not extra_tools:
-                    # No additional_tools present → non-Codex or already standard.
+                if not found:
+                    # No additional_tools item present → non-Codex or already standard.
                     return data
-                # Merge into top-level tools (preserve any existing top-level tools).
-                existing = data.get("tools")
-                merged = (existing if isinstance(existing, list) else []) + extra_tools
-                data["tools"] = merged
+                # Drop the additional_tools item(s) from input unconditionally.
                 data["input"] = kept_items
+                # Merge any carried tools into top-level tools (preserve existing).
+                if extra_tools:
+                    existing = data.get("tools")
+                    merged = (existing if isinstance(existing, list) else []) + extra_tools
+                    data["tools"] = merged
                 verbose_logger.info(
-                    "CodexAdditionalToolsFlatten: flattened %d tool(s) from "
-                    "additional_tools into top-level tools (model=%s)"
+                    "CodexAdditionalToolsFlatten: removed additional_tools item(s), "
+                    "flattened %d tool(s) into top-level tools (model=%s)"
                     % (len(extra_tools), str(data.get("model", "")))
                 )
             except Exception as e:
