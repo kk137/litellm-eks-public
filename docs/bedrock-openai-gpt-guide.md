@@ -1,6 +1,6 @@
 # 通过 Amazon Bedrock 接入 OpenAI GPT 模型 — 完整指南
 
-> **适用模型：** GPT-5.5、GPT-5.4、Codex（2026-06-01 GA）  
+> **适用模型：** GPT-5.6（Sol/Terra/Luna，2026-07-13 GA）、GPT-5.5、GPT-5.4、Codex  
 > **核心 API：** OpenAI Responses API（非 Chat Completions）  
 > **Endpoint 格式：** `https://bedrock-mantle.{region}.api.aws/openai/v1`
 
@@ -274,17 +274,25 @@ web_search = "disabled"
 
 | 模型 | Region |
 |------|--------|
-| GPT-5.5 | us-east-2 |
-| GPT-5.4 | us-east-2, us-west-2 |
+| GPT-5.6 Sol | us-east-1, us-east-2 |
+| GPT-5.6 Terra | us-east-1, us-east-2, us-west-2 |
+| GPT-5.6 Luna | us-east-1, us-east-2, us-west-2 |
+| GPT-5.5 | us-east-1, us-east-2 |
+| GPT-5.4 | us-east-1, us-east-2, us-west-2 |
+
+> **GPT-5.6（2026-07-13 GA）** 是三档模型：`Sol` 旗舰推理 / `Terra` 均衡（GPT-5.5 性能半价）/ `Luna` 最省最快。均 272K 上下文、仅 Responses API、**无 geo/global CRIS（只能 in-region）**。
 
 ### 可选 Model ID
 
-| Model ID | 说明 | 可用 Region |
-|----------|------|------------|
-| `openai.gpt-5.5` | 最强推理 | us-east-2 |
-| `openai.gpt-5.4` | 性价比最优 | us-east-2, us-west-2 |
-| `openai.gpt-oss-120b` | 大型通用 | 待确认 |
-| `openai.gpt-oss-20b` | 轻量低延迟 | 待确认 |
+| Model ID | 说明 | 可用 Region | 价格（输入/缓存读/输出，$ per 1M） |
+|----------|------|------------|-----------------------------------|
+| `openai.gpt-5.6-sol` | 5.6 旗舰推理 | us-east-1, us-east-2 | 5.00 / 0.50 / 30.00 |
+| `openai.gpt-5.6-terra` | 5.6 均衡（半价 5.5） | us-east-1, us-east-2, us-west-2 | 2.50 / 0.25 / 15.00 |
+| `openai.gpt-5.6-luna` | 5.6 最省最快 | us-east-1, us-east-2, us-west-2 | 1.00 / 0.10 / 6.00 |
+| `openai.gpt-5.5` | 5.5 最强推理 | us-east-1, us-east-2 | 5.50 / 0.55 / 33.00 |
+| `openai.gpt-5.4` | 性价比最优 | us-east-1, us-east-2, us-west-2 | 2.75 / 0.275 / 16.50 |
+| `openai.gpt-oss-120b` | 大型通用 | 多区（含 us-east-1/2, us-west-2） | 待确认 |
+| `openai.gpt-oss-20b` | 轻量低延迟 | 多区 | 待确认 |
 
 ---
 
