@@ -48,6 +48,15 @@ data:
           supports_prompt_caching: true
           max_input_tokens: 1000000
           max_output_tokens: 128000
+      - model_name: claude-opus-5
+        litellm_params:
+          model: bedrock/us.anthropic.claude-opus-5
+          aws_region_name: us-east-1
+          stream_timeout: 900
+        # Opus 5 后端默认 1M context；thinking 默认开启（与 4.8 不同），max_tokens 需留余量
+        model_info:
+          max_input_tokens: 1000000
+          max_output_tokens: 128000
       - model_name: claude-opus-4-8
         litellm_params:
           model: bedrock/us.anthropic.claude-opus-4-8
