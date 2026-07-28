@@ -291,6 +291,12 @@ data:
           - embedding
       # Callbacks: must use "callbacks" (not success_callback) to enable handler instantiation
       callbacks:
+        # Loaded first, for its import-time side effect only: raises the hardcoded
+        # 600s httpx default that LiteLLM's /v1/messages route falls back to (that
+        # route drops every configured timeout — litellm#26752, fixed upstream in
+        # v1.94.0-rc.1). Long non-streaming generations legitimately run past 600s
+        # and would otherwise fail with a client-side timeout. No per-request cost.
+        - "litellm_httpx_timeout_patch.litellm_httpx_timeout_patch_instance"
         - "bedrock_team_tag_hook.bedrock_team_tag_hook_instance"
         - "codex_additional_tools_flatten.codex_additional_tools_flatten_instance"
         - "prometheus"
@@ -546,3 +552,104 @@ data:
     # Module-level instance referenced by config.yaml callbacks:
     #   callbacks: ["bedrock_team_tag_hook.bedrock_team_tag_hook_instance"]
     bedrock_team_tag_hook_instance = BedrockTeamTagHook()
+
+  litellm_httpx_timeout_patch.py: |
+    """Raise LiteLLM's hardcoded httpx default timeout (workaround, remove after upgrade).
+
+    WHY THIS EXISTS
+    ---------------
+    LiteLLM's ``/v1/messages`` (anthropic_messages) route drops every configured
+    timeout. ``async_anthropic_messages_handler`` issues its ``.post()`` without a
+    ``timeout=`` argument, so the request falls back to the module-level default in
+    ``litellm.llms.custom_httpx.http_handler``, which is hardcoded:
+
+        COMPLETION_HTTP_FALLBACK_SECONDS = 600.0   # litellm/constants.py
+
+    The Router *does* resolve the right value and puts it in ``kwargs["timeout"]``,
+    but that handler never reads it. Net effect on v1.84.3: ``router_settings.timeout``,
+    ``litellm_settings.request_timeout``, per-model ``timeout`` and ``stream_timeout``
+    are all silently ignored on that route, and non-streaming requests are capped at
+    600s. Streaming is unaffected (httpx applies the read timeout per chunk, so a
+    stream only needs its inter-chunk gap to stay under the limit).
+
+    Observed impact: Claude Code agent-teams requests with very long output
+    (~27k tokens) legitimately take 320-600s, so they sit right under the 600s
+    ceiling and fail whenever generation runs slightly long. Retries reuse the same
+    non-streaming path and fail identically.
+
+    Upstream: issue #26752 / #30836, fixed by PR #33418 (merged 2026-07-15).
+    The fix first appears in v1.94.0-rc.1 — NOT in any stable release up to v1.93.0,
+    and it was never backported to the 1.84-1.93 stable lines.
+
+    WHAT THIS DOES
+    --------------
+    Rebinds the module-level ``_DEFAULT_TIMEOUT`` at import time, before the proxy
+    serves any request. ``get_async_httpx_client()`` reads that module global when it
+    constructs (and caches) a client, so the new value applies to every client built
+    afterwards. ``llm_http_handler`` does not import the name directly, so rebinding
+    the module attribute is sufficient — there is no stale from-import binding.
+
+    Loaded via ``callbacks:`` purely for its import side effect: LiteLLM resolves a
+    callback module relative to the config dir (/app/config), which is where this
+    file is mounted, so no PYTHONPATH change is needed. The callback class itself is
+    a no-op and adds zero per-request overhead.
+
+    SCOPE / CAVEATS
+    ---------------
+    ``_DEFAULT_TIMEOUT`` is shared by every provider client built without explicit
+    params, so this raises the default ceiling proxy-wide rather than only on the
+    affected route. Raising it only removes a cap (it never shortens a timeout), but
+    a genuinely hung non-streaming call now holds its connection longer before
+    erroring. 1200s is aligned with the ALB idle timeout — past that the load
+    balancer cuts the connection first, so a larger value would not buy anything.
+
+    ``connect`` is pinned to 5s explicitly so widening the read timeout does not also
+    make connect failures take 20 minutes to surface.
+
+    Not patched by this module: ``pass_through_endpoints.py`` passes an explicit
+    ``params={"timeout": 600}``, so passthrough routes keep their own 600s cap.
+
+    REMOVAL
+    -------
+    Delete this file, drop its entry from ``callbacks:``, and remove the
+    ``configData`` line in cluster-stack.ts once the proxy runs a release containing
+    PR #33418. Then set the real config keys (per-model ``timeout`` /
+    ``stream_timeout``), which that release honours.
+    """
+
+    import os
+
+    import httpx
+    from litellm.integrations.custom_logger import CustomLogger
+    from litellm.llms.custom_httpx import http_handler as _http_handler
+
+    # Aligned with the ALB idle timeout; override without rebuilding by setting the
+    # env var on the deployment (e.g. back to "600" for a fast rollback).
+    _TIMEOUT_SECONDS = float(os.getenv("LITELLM_HTTPX_DEFAULT_TIMEOUT", "1200"))
+    _CONNECT_TIMEOUT_SECONDS = 5.0
+
+    _PREVIOUS_TIMEOUT = getattr(_http_handler, "_DEFAULT_TIMEOUT", None)
+
+    _http_handler._DEFAULT_TIMEOUT = httpx.Timeout(
+        timeout=_TIMEOUT_SECONDS,
+        connect=_CONNECT_TIMEOUT_SECONDS,
+    )
+
+    try:  # best effort: surface the patch in the proxy startup log
+        from litellm._logging import verbose_proxy_logger
+
+        verbose_proxy_logger.info(
+            "httpx timeout patch applied: %s -> %s (workaround for litellm#26752)",
+            _PREVIOUS_TIMEOUT,
+            _http_handler._DEFAULT_TIMEOUT,
+        )
+    except Exception:  # pragma: no cover - logging must never break startup
+        pass
+
+
+    class HttpxTimeoutPatch(CustomLogger):
+        """No-op callback. The patch above runs at import time; this only exists so
+        LiteLLM's ``callbacks:`` list has an instance to load."""
+
+
+    litellm_httpx_timeout_patch_instance = HttpxTimeoutPatch()
