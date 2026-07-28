@@ -17,6 +17,7 @@ EKS → Karpenter → Redis/Aurora → Secrets → Helm → IRSA → CloudFront 
 |------|------|
 | [本 README](#部署步骤) | 主干部署流程（10 步）、组件清单、WAF/模型/SSO/运维/清理 |
 | [docs/operations.md](docs/operations.md) | 完整运维手册：升级、回滚、Secrets 轮换、已知问题、紧急场景 |
+| [docs/hooks-and-callbacks.md](docs/hooks-and-callbacks.md) | **ConfigMap 里的 hook/callback 全览**：7 个 hook 各自解决什么问题、加载机制与顺序、怎么加/删/验证（含假阴性陷阱） |
 | [docs/monitoring-logging-audit-guide.md](docs/monitoring-logging-audit-guide.md) | 监控/日志/审计三维度 + S3 请求日志 |
 | [docs/bedrock-per-team-attribution-us-east-1-runbook.md](docs/bedrock-per-team-attribution-us-east-1-runbook.md) | per-team Bedrock 成本归因 runbook（STS session tag → CUR `iamPrincipal/team`，独立 exec 角色） |
 | [docs/bedrock-openai-gpt-guide.md](docs/bedrock-openai-gpt-guide.md) | GPT-5.5/5.4 经 Bedrock 接入（直连 + LiteLLM 两条路径） |
