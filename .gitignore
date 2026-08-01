@@ -32,3 +32,7 @@ docs/ttft-poc-test.py
 
 # Reference: AWS-blog CFN+ECS LiteLLM repo (zhangzhenhuajack/aws-builder), downloaded for analysis
 litellm-ecs-cfn-reference/
+
+# 第三方环境(非本账号)的 per-team 归因参考文档 — 含他人账号 ID 和 IAM role ARN,绝不入库
+# 我们自己的版本见 docs/bedrock-per-team-attribution-us-east-1-runbook.md
+bedrock-cost-attribution.txt
