@@ -138,7 +138,7 @@ data:
       # Mantle's gpt-5.6/5.5/5.4 only expose /openai/v1/responses, NOT chat/completions.
       # Use openai/ provider + the /openai/v1 base: LiteLLM appends /responses.
       # Clients MUST call the proxy's /v1/responses endpoint (responses.create).
-      # GPT-5.6 family (GA 2026-07-13, Responses-only, 272K ctx, no geo/global CRIS,
+      # GPT-5.6 family (GA 2026-07-13, Responses-only, 1M ctx since 2026-08-03, no geo/global CRIS,
       # in-region only). Sol=flagship; Terra=GPT-5.5 perf @ half cost; Luna=cheapest.
       # Pricing per AWS Bedrock pricing page (matches OpenAI first-party rates).
       - model_name: gpt-5.6-sol
@@ -148,7 +148,7 @@ data:
           api_key: os.environ/BEDROCK_MANTLE_API_KEY
           drop_params: true
         model_info:
-          max_input_tokens: 272000
+          max_input_tokens: 1048576
           input_cost_per_token: 0.000005
           input_cost_per_token_cache_hit: 0.0000005
           output_cost_per_token: 0.00003
@@ -159,7 +159,7 @@ data:
           api_key: os.environ/BEDROCK_MANTLE_API_KEY
           drop_params: true
         model_info:
-          max_input_tokens: 272000
+          max_input_tokens: 1048576
           input_cost_per_token: 0.0000025
           input_cost_per_token_cache_hit: 0.00000025
           output_cost_per_token: 0.000015
@@ -170,7 +170,7 @@ data:
           api_key: os.environ/BEDROCK_MANTLE_API_KEY
           drop_params: true
         model_info:
-          max_input_tokens: 272000
+          max_input_tokens: 1048576
           input_cost_per_token: 0.000001
           input_cost_per_token_cache_hit: 0.0000001
           output_cost_per_token: 0.000006
