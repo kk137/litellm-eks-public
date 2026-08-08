@@ -1,4 +1,4 @@
-# Horizontal Pod Autoscaler — scales replicas based on CPU & memory
+# Horizontal Pod Autoscaler — scales replicas based on CPU
 # Requires: metrics-server installed in cluster
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -22,15 +22,9 @@ spec:
           type: Utilization
           averageUtilization: 65
 
-    # Scale up when average memory > 80%
-    # (Raised from 75%: at 3 replicas steady-state memory is ~76%, which would
-    #  otherwise keep HPA pinned at 4. 80% lets it hold the intended 3 replicas.)
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
+    # CPU only — no memory metric. The Prisma query engine holds a memory
+    # high-water mark that never comes back down, so a memory target latches
+    # the HPA up and never lets it scale back in.
 
   behavior:
     scaleUp:

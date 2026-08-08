@@ -255,10 +255,10 @@ data:
           drop_params: true
 
     # ============================================================
-    # Router Settings — least-busy routing + fallback
+    # Router Settings — simple-shuffle routing + fallback
     # ============================================================
     router_settings:
-      routing_strategy: least-busy    # Options: simple-shuffle | least-busy | latency-based-routing
+      routing_strategy: simple-shuffle    # Options: simple-shuffle | least-busy | latency-based-routing
       num_retries: 3
       retry_after: 5
       timeout: 1200
@@ -340,6 +340,10 @@ data:
       redis_port: "6379"
       redis_password: os.environ/REDIS_PASSWORD
       redis_ssl: true
+      # Batch spend writes to the DB every 60s instead of per-request
+      proxy_batch_write_at: 60
+      # Don't write LLM exceptions to the DB — S3 logging already has them all
+      disable_error_logs: true
 
   codex_additional_tools_flatten.py: |
     """

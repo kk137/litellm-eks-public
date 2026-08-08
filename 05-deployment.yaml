@@ -178,6 +178,8 @@ spec:
           env:
             - name: LITELLM_LOG
               value: "INFO"
+            - name: LITELLM_MODE
+              value: "PRODUCTION"
             - name: SEARXNG_API_BASE
               value: "http://searxng:8080"
             - name: PRISMA_BINARY_CACHE_DIR
