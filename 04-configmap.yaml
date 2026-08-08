@@ -368,6 +368,16 @@ data:
       2. merge each one's `tools` into the top-level `data["tools"]`
       3. drop the additional_tools item(s) from `data["input"]`
 
+    Codex >=0.147 additionally wraps the whole toolset in a container tool
+    {"type": "namespace", "name": "functions", "tools": [...]} (openai/codex#37022,
+    "Canonicalize default tools under the `functions` namespace"). "functions" is
+    the RESERVED implicit namespace of classic function tools: the first-party
+    OpenAI API special-cases it, but Mantle rejects it with 400 "User-defined
+    namespace 'functions' collides with an existing tool namespace". So step 4:
+    unwrap that ONE container after the merge — nested tools keep their bare names
+    (exec, wait, ...) in output items either way, so this is lossless. Namespaces
+    with any OTHER name pass through untouched (Mantle accepts those).
+
     Scope guard:
       - Only touches `aresponses` calls whose input actually contains an
         `additional_tools` item. Every other request returns untouched.
@@ -379,6 +389,29 @@ data:
 
     # call_types that carry a Responses-API body (data["input"] / data["tools"])
     _RESPONSES_CALL_TYPES = {"aresponses"}
+
+
+    def _unwrap_functions_namespace(tools):
+        """Unwrap Codex >=0.147's namespace-"functions" container tool (see module
+        docstring). Returns the rewritten list, or None when no container present."""
+        if not isinstance(tools, list):
+            return None
+        hit = False
+        out = []
+        for t in tools:
+            if (
+                isinstance(t, dict)
+                and t.get("type") == "namespace"
+                and t.get("name") == "functions"
+            ):
+                hit = True
+                nested = t.get("tools")
+                if isinstance(nested, list):
+                    out.extend(nested)
+            else:
+                out.append(t)
+        return out if hit else None
+
 
 
     class CodexAdditionalToolsFlatten(CustomLogger):
@@ -413,7 +446,17 @@ data:
                     else:
                         kept_items.append(item)
                 if not found:
-                    # No additional_tools item present → non-Codex or already standard.
+                    # No additional_tools item → non-Codex or already standard, but
+                    # Codex may still have put the namespace-"functions" wrapper in
+                    # top-level tools; unwrap it there too.
+                    unwrapped = _unwrap_functions_namespace(data.get("tools"))
+                    if unwrapped is not None:
+                        data["tools"] = unwrapped
+                        verbose_logger.info(
+                            "CodexAdditionalToolsFlatten: unwrapped namespace-'functions' "
+                            "container in top-level tools (model=%s)"
+                            % str(data.get("model", ""))
+                        )
                     return data
                 # Drop the additional_tools item(s) from input unconditionally.
                 data["input"] = kept_items
@@ -421,7 +464,8 @@ data:
                 if extra_tools:
                     existing = data.get("tools")
                     merged = (existing if isinstance(existing, list) else []) + extra_tools
-                    data["tools"] = merged
+                    unwrapped = _unwrap_functions_namespace(merged)
+                    data["tools"] = unwrapped if unwrapped is not None else merged
                 verbose_logger.info(
                     "CodexAdditionalToolsFlatten: removed additional_tools item(s), "
                     "flattened %d tool(s) into top-level tools (model=%s)"
