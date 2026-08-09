@@ -564,6 +564,35 @@ data:
                 self._cache[team] = (creds, now + _CRED_TTL_SECONDS)
             return creds
 
+        @staticmethod
+        def _is_bedrock_model(public_name: str) -> bool:
+            """Resolve the PUBLIC model_name to its litellm_params model and test the
+            provider prefix.
+
+            At pre-call the proxy has not resolved custom_llm_provider yet and
+            data["model"] is the public name (e.g. 'gpt-5.6-sol', 'codex-auto-review'),
+            whose prefix says nothing about the backend. So look the name up in the
+            router's model_list. Unknown/unresolvable names return False: the tag is a
+            best-effort attribution nicety, while a wrong injection breaks the request
+            (Mantle 400 'Unknown parameter: requestMetadata').
+            """
+            try:
+                from litellm.proxy import proxy_server
+
+                model_list = getattr(proxy_server, "llm_model_list", None) or []
+                for entry in model_list:
+                    if entry.get("model_name") != public_name:
+                        continue
+                    target = str((entry.get("litellm_params") or {}).get("model", ""))
+                    if target.startswith("bedrock/"):
+                        return True
+                return False
+            except Exception as e:
+                verbose_logger.warning(
+                    f"BedrockTeamTagHook: model_list lookup failed for {public_name!r}: {e}"
+                )
+                return False
+
         async def async_pre_call_hook(
             self, user_api_key_dict, cache, data, call_type
         ):
@@ -579,11 +608,32 @@ data:
             if not team:
                 # No team → pass through (keeps untagged requests working).
                 return data
-            # Inject assumed-role creds for ALL team requests. At the proxy pre-call
-            # hook, data["model"] is the PUBLIC model_name (e.g. 'bedrock-nova-pro'),
-            # not the litellm_params 'bedrock/...' id, and custom_llm_provider is not
-            # yet resolved — so we cannot reliably detect bedrock here. For non-bedrock
-            # backends the injected aws_* keys are simply ignored, so this is safe.
+            # At the proxy pre-call hook, data["model"] is the PUBLIC model_name
+            # (e.g. 'bedrock-nova-pro') and custom_llm_provider is not yet resolved,
+            # so the backend is resolved via the router's model_list below.
+            # Also tag the Bedrock invocation log itself via requestMetadata, so the
+            # team is queryable in near-real-time from CloudWatch model-invocation
+            # logs (the STS session tag only surfaces in CUR 2.0, hours later).
+            # LiteLLM validates + forwards this into the Converse request body's
+            # top-level `requestMetadata`, which Bedrock records in the log. Only
+            # the Converse path honors it; non-bedrock backends ignore it safely.
+            # Bedrock-only. Both the requestMetadata tag and the assumed-role creds
+            # are Bedrock-specific: LiteLLM forwards requestMetadata into the request
+            # body for EVERY provider, so injecting it on an OpenAI-compatible
+            # endpoint (Bedrock Mantle for gpt-5.x, gemini/, anthropic/) gets the
+            # whole request rejected with 400 "Unknown parameter: requestMetadata".
+            # Skipping non-Bedrock also avoids a pointless STS AssumeRole per call.
+            if not self._is_bedrock_model(model):
+                # debug: the skip path is the interesting one when attribution looks
+                # missing for a model, but logging it at INFO adds a line to every
+                # non-Bedrock team request.
+                verbose_logger.debug(
+                    f"BedrockTeamTagHook: skip non-Bedrock model={model!r} team={team!r}"
+                )
+                return data
+            md = dict(data.get("requestMetadata") or {})
+            md["team"] = _safe_tag_value(team)
+            data["requestMetadata"] = md
             try:
                 creds = self._assume_for_team(team)
                 data["aws_access_key_id"] = creds["aws_access_key_id"]
