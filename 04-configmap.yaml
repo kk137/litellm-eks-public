@@ -441,12 +441,53 @@ data:
 
 
 
+    def _clamp_astra_reasoning_summary(data):
+        """Bedrock's GPT-6 Astra only accepts reasoning.summary == "auto".
+
+        Probed on bedrock-mantle: summary "concise" and "detailed" both 400 with
+        "Unsupported parameter: 'reasoning.summary' is not supported with the
+        'openai.gpt-6-astra' model", while "auto" and omitting it return 200.
+        This is a Bedrock-side restriction, not a model one — OpenAI's own Astra
+        docs list only effort:none / temperature / top_p / logprobs as unsupported,
+        and gpt-5.6-* accepts every summary value here.
+
+        Codex sends a non-auto summary, so every Codex->Astra call fails. Clamp it
+        to "auto" instead of dropping the whole reasoning object, which would also
+        lose effort. Other models are left untouched.
+        """
+        model = str(data.get("model", ""))
+        if "gpt-6-astra" not in model:
+            return
+        reasoning = data.get("reasoning")
+        if not isinstance(reasoning, dict):
+            return
+        summary = reasoning.get("summary")
+        if summary is None or summary == "auto":
+            return
+        reasoning = dict(reasoning)
+        reasoning["summary"] = "auto"
+        data["reasoning"] = reasoning
+        verbose_logger.info(
+            "CodexAdditionalToolsFlatten: clamped reasoning.summary %r -> 'auto' "
+            "for %s (Bedrock Astra rejects non-auto)" % (summary, model)
+        )
+
+
     class CodexAdditionalToolsFlatten(CustomLogger):
         async def async_pre_call_hook(
             self, user_api_key_dict, cache, data, call_type
         ):
             if call_type not in _RESPONSES_CALL_TYPES:
                 return data
+            try:
+                # Runs before the input-shape check below: Astra requests can carry
+                # a plain-string input, which would otherwise return early and skip
+                # the clamp.
+                _clamp_astra_reasoning_summary(data)
+            except Exception as e:
+                verbose_logger.warning(
+                    "CodexAdditionalToolsFlatten: summary clamp failed: %s" % e
+                )
             try:
                 input_items = data.get("input")
                 if not isinstance(input_items, list):
