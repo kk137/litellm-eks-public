@@ -141,6 +141,25 @@ data:
       # GPT-5.6 family (GA 2026-07-13, Responses-only, 1M ctx since 2026-08-03, no geo/global CRIS,
       # in-region only). Sol=flagship; Terra=GPT-5.5 perf @ half cost; Luna=cheapest.
       # Pricing per AWS Bedrock pricing page (matches OpenAI first-party rates).
+      # GPT-6 Astra (GA on Bedrock 2026-09-08), OpenAI's most capable model.
+      # us-west-2 ONLY — us-east-1/us-east-2 both 404 this model id (probed).
+      # 1.05M context / 128K max output. Prices below are SHORT-context rates;
+      # requests >272K input bill at 2x input+cache and 1.5x output upstream,
+      # which LiteLLM can't express — cost tracking under-reports huge prompts.
+      # Astra dropped temperature/top_p/effort:none/prompt_cache_retention;
+      # drop_params keeps clients that still send them from 400ing.
+      - model_name: gpt-6-astra
+        litellm_params:
+          model: openai/openai.gpt-6-astra
+          api_base: https://bedrock-mantle.us-west-2.api.aws/openai/v1
+          api_key: os.environ/BEDROCK_MANTLE_API_KEY
+          drop_params: true
+        model_info:
+          max_input_tokens: 1050000
+          max_output_tokens: 128000
+          input_cost_per_token: 0.00001
+          input_cost_per_token_cache_hit: 0.000001
+          output_cost_per_token: 0.00005
       - model_name: gpt-5.6-sol
         litellm_params:
           model: openai/openai.gpt-5.6-sol
@@ -160,9 +179,10 @@ data:
           drop_params: true
         model_info:
           max_input_tokens: 1048576
-          input_cost_per_token: 0.0000025
-          input_cost_per_token_cache_hit: 0.00000025
-          output_cost_per_token: 0.000015
+          # Price cut 2026-07-30 (Bedrock): input -20% ($2.5->$2), output $15->$12
+          input_cost_per_token: 0.000002
+          input_cost_per_token_cache_hit: 0.0000002
+          output_cost_per_token: 0.000012
       - model_name: gpt-5.6-luna
         litellm_params:
           model: openai/openai.gpt-5.6-luna
@@ -171,9 +191,10 @@ data:
           drop_params: true
         model_info:
           max_input_tokens: 1048576
-          input_cost_per_token: 0.000001
-          input_cost_per_token_cache_hit: 0.0000001
-          output_cost_per_token: 0.000006
+          # Price cut 2026-07-30 (Bedrock): Luna -80% (in $1->$0.2, out $6->$1.2)
+          input_cost_per_token: 0.0000002
+          input_cost_per_token_cache_hit: 0.00000002
+          output_cost_per_token: 0.0000012
       - model_name: gpt-5.5
         litellm_params:
           model: openai/openai.gpt-5.5
@@ -213,16 +234,22 @@ data:
       # Grok 4.3 is us-west-2 (Oregon) ONLY — no geo/global CRIS. Mantle endpoint.
       # Supports BOTH Chat Completions and Responses API (unlike gpt-5.4 which is
       # Responses-only), so clients can call /v1/chat/completions or /v1/responses.
-      - model_name: grok-4.3
+      # Grok 4.6 (on Bedrock 2026-08-19) replaces Grok 4.3. 500K context (down
+      # from 4.3's 1M), adds xhigh reasoning tier. Price is the mantle
+      # In-Region/Geo rate; the cheaper Global cross-Region rate ($2.00/$6.00)
+      # needs SigV4 on bedrock-runtime /openai/v1, which LiteLLM's openai/
+      # provider can't auth (bearer-only, upstream #29665).
+      - model_name: grok-4.6
         litellm_params:
-          model: openai/xai.grok-4.3
+          model: openai/xai.grok-4.6
           api_base: https://bedrock-mantle.us-west-2.api.aws/openai/v1
           api_key: os.environ/BEDROCK_MANTLE_API_KEY
           drop_params: true
         model_info:
-          max_input_tokens: 1000000
-          input_cost_per_token: 0.00000125
-          output_cost_per_token: 0.0000025
+          max_input_tokens: 500000
+          input_cost_per_token: 0.0000022
+          input_cost_per_token_cache_hit: 0.00000055
+          output_cost_per_token: 0.0000066
 
       # --- Codex internal-task aliases ---
       # Codex 的 guardian_approval(执行前自动审批)用 OpenAI 原生 slug
